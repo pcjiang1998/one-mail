@@ -30,7 +30,7 @@
     "build": "pnpm run typecheck && electron-vite build",
     "postinstall": "install-electron && electron-builder install-app-deps",
     "build:unpack": "pnpm run build && electron-builder --dir",
-    "build:win": "pnpm run build && electron-builder --win",
+    "build:win": "pnpm run build && node scripts/build-win.mjs",
     "build:mac": "pnpm run build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux"
   },
