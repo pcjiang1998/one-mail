@@ -27,6 +27,7 @@ nsis:
   createDesktopShortcut: always
 mac:
   icon: build/icon.icns
+  artifactName: ${name}-${version}-${arch}.${ext}
   category: public.app-category.productivity
   target:
     - dmg
@@ -41,7 +42,7 @@ mac:
   notarize: false
 dmg:
   icon: build/icon.png
-  artifactName: ${name}-${version}.${ext}
+  artifactName: ${name}-${version}-${arch}.${ext}
 linux:
   icon: build/icons
   target:
@@ -55,6 +56,6 @@ appImage:
 npmRebuild: false
 publish:
   provider: github
-  owner: zhihui-hu
+  owner: pcjiang1998
   repo: one-mail
   releaseType: release

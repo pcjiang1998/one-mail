@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to upload artifacts to
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -26,13 +31,10 @@ jobs:
         include:
           - os: macos-latest
             target: mac
-            build_args: --mac
           - os: windows-latest
             target: win
-            build_args: --win
           - os: ubuntu-latest
             target: linux
-            build_args: --linux AppImage deb
 
     steps:
       - name: Checkout
@@ -69,9 +71,35 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build and publish
-        run: |
-          pnpm run build
-          pnpm exec electron-builder ${{ matrix.build_args }} --publish always
+      - name: Build application
+        run: pnpm run build
+
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        run: node scripts/build-win.mjs
+
+      - name: Package macOS
+        if: runner.os == 'macOS'
+        run: pnpm exec electron-builder --mac --x64 --arm64
+
+      - name: Package Linux
+        if: runner.os == 'Linux'
+        run: pnpm exec electron-builder --linux AppImage deb
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          fail_on_unmatched_files: false
+          files: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/*.dmg
+            dist/*.zip
+            dist/*.AppImage
+            dist/*.deb
+            dist/latest.yml
+            dist/latest-mac.yml
+            dist/latest-linux.yml
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
