@@ -740,11 +740,8 @@ export function MailboxWorkspace(): React.JSX.Element {
       .catch(() => undefined)
   }
 
-  async function handleUpdateAccountPolicy(
-    accountId: number,
-    remoteDeletePolicy: NonNullable<AccountUpdateInput['remoteDeletePolicy']>
-  ): Promise<void> {
-    await updateAccount({ accountId, remoteDeletePolicy })
+  async function handleUpdateAccountSettings(input: AccountUpdateInput): Promise<void> {
+    await updateAccount(input)
     await refreshAccounts()
   }
 
@@ -1018,6 +1015,7 @@ export function MailboxWorkspace(): React.JSX.Element {
 
       <EditAccountDialog
         account={dialogAccount ?? selectedAccount}
+        settings={settings}
         open={dialogKind === 'edit'}
         onOpenChange={(open) => {
           setDialogKind(open ? 'edit' : null)
@@ -1065,7 +1063,8 @@ export function MailboxWorkspace(): React.JSX.Element {
         onOpenChange={(open) => setDialogKind(open ? 'settings' : null)}
         onSubmit={handleUpdateSettings}
         accounts={realAccounts}
-        onUpdateAccountPolicy={handleUpdateAccountPolicy}
+        onUpdateAccount={handleUpdateAccountSettings}
+        onRefreshAccounts={refreshAccounts}
         onImported={reloadInitialData}
       />
       <BackupImportDialog

@@ -3,8 +3,10 @@ import { z } from 'zod'
 import type { TranslationKey } from '@renderer/lib/i18n'
 import type {
   AuthType,
+  AccountProxyMode,
   ImapSecurity,
   RemoteDeletePolicy,
+  SignatureMode,
   SmtpSecurity
 } from '../../../../shared/types'
 
@@ -65,6 +67,14 @@ export type AccountFormValues = {
   smtpSecurity: SmtpSecurity
   smtpEnabled: boolean
   remoteDeletePolicy: RemoteDeletePolicy
+  usePopProtocol: boolean
+  popHost?: string
+  popPort: number
+  popSecurity: ImapSecurity
+  proxyMode: AccountProxyMode
+  customProxyUrl?: string
+  signatureMode: SignatureMode
+  signatureId?: number
 }
 
 export const providerPresets: ProviderPreset[] = [
@@ -413,7 +423,19 @@ export function createAccountSchema(
         .max(65535, t('account.form.portMax')),
       smtpSecurity: z.enum(['ssl_tls', 'starttls', 'none']),
       smtpEnabled: z.boolean(),
-      remoteDeletePolicy: z.enum(['inherit', 'enabled', 'disabled'])
+      remoteDeletePolicy: z.enum(['inherit', 'enabled', 'disabled']),
+      usePopProtocol: z.boolean(),
+      popHost: z.string().trim().optional(),
+      popPort: z
+        .number(t('account.form.portRequired'))
+        .int(t('account.form.portInteger'))
+        .min(1, t('account.form.portMin'))
+        .max(65535, t('account.form.portMax')),
+      popSecurity: z.enum(['ssl_tls', 'starttls', 'none']),
+      proxyMode: z.enum(['global', 'none', 'system', 'custom']),
+      customProxyUrl: z.string().trim().optional(),
+      signatureMode: z.enum(['global', 'none', 'custom']),
+      signatureId: z.number().int().positive().optional()
     })
     .superRefine((value, context) => {
       if (value.kind !== 'outlook' && !z.email().safeParse(value.email).success) {
@@ -432,13 +454,37 @@ export function createAccountSchema(
         })
       }
 
+      if (value.proxyMode === 'custom' && !isValidSocks5Url(value.customProxyUrl)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['customProxyUrl'],
+          message: t('account.form.invalidProxyUrl')
+        })
+      }
+
+      if (value.signatureMode === 'custom' && !value.signatureId) {
+        context.addIssue({
+          code: 'custom',
+          path: ['signatureId'],
+          message: t('account.form.requiredSignature')
+        })
+      }
+
       if (value.kind !== 'custom') return
 
-      if (!value.imapHost?.trim()) {
+      if (!value.usePopProtocol && !value.imapHost?.trim()) {
         context.addIssue({
           code: 'custom',
           path: ['imapHost'],
           message: t('account.form.requiredImapHost')
+        })
+      }
+
+      if (value.usePopProtocol && !value.popHost?.trim()) {
+        context.addIssue({
+          code: 'custom',
+          path: ['popHost'],
+          message: t('account.form.requiredPopHost')
         })
       }
 
@@ -466,7 +512,23 @@ export const defaultAccountFormValues: AccountFormValues = {
   smtpPort: 465,
   smtpSecurity: 'ssl_tls',
   smtpEnabled: true,
-  remoteDeletePolicy: 'inherit'
+  remoteDeletePolicy: 'inherit',
+  usePopProtocol: false,
+  popHost: '',
+  popPort: 995,
+  popSecurity: 'ssl_tls',
+  proxyMode: 'global',
+  customProxyUrl: '',
+  signatureMode: 'global'
+}
+
+function isValidSocks5Url(value?: string): boolean {
+  try {
+    const url = new URL(value ?? '')
+    return url.protocol === 'socks5:' && Boolean(url.hostname) && Boolean(url.port)
+  } catch {
+    return false
+  }
 }
 
 export function getProviderPreset(kind: AccountKind): ProviderPreset {

@@ -7,7 +7,7 @@ export function createBackupSyncDraft(
   if (provider === 'webdav') {
     return current?.provider === 'webdav'
       ? { ...current }
-      : { provider: 'webdav', remoteUrl: '', username: '' }
+      : { provider: 'webdav', remoteUrl: '', username: '', readKey: '' }
   }
 
   if (provider === 's3') {
@@ -19,7 +19,8 @@ export function createBackupSyncDraft(
           region: 'us-east-1',
           bucket: '',
           key: 'onemail-backup.sql',
-          accessKeyId: ''
+          accessKeyId: '',
+          readKey: ''
         }
   }
 
@@ -29,10 +30,10 @@ export function createBackupSyncDraft(
 export function getBackupSyncSettingsKey(settings: BackupSyncSettings | null): string {
   if (!settings) return 'backup-sync-loading'
   if (settings.provider === 'webdav') {
-    return `webdav:${settings.remoteUrl}:${settings.username ?? ''}:${settings.passwordConfigured ? '1' : '0'}`
+    return `webdav:${settings.remoteUrl}:${settings.username ?? ''}:${settings.passwordConfigured ? '1' : '0'}:${settings.readKeyConfigured ? '1' : '0'}`
   }
   if (settings.provider === 's3') {
-    return `s3:${settings.endpoint ?? ''}:${settings.region}:${settings.bucket}:${settings.key}:${settings.accessKeyId}:${settings.secretAccessKeyConfigured ? '1' : '0'}`
+    return `s3:${settings.endpoint ?? ''}:${settings.region}:${settings.bucket}:${settings.key}:${settings.accessKeyId}:${settings.secretAccessKeyConfigured ? '1' : '0'}:${settings.readKeyConfigured ? '1' : '0'}`
   }
   return 'none'
 }

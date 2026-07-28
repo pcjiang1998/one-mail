@@ -2,6 +2,8 @@ import { getDatabase, toNumber, toOptionalString } from '../connection'
 import type { SyncStatus } from '../../ipc/types'
 import { syncAccountMailbox, type AccountMailboxSyncMode } from '../../mail/imap-sync'
 import { isImapAuthErrorMessage, isImapNetworkErrorMessage } from '../../mail/imap-errors'
+import { getAccount } from './account.repository'
+import { syncPop3Account } from '../../mail/pop3-sync'
 
 type SyncRunRow = {
   account_id: number | null
@@ -100,7 +102,12 @@ async function syncSingleAccount(
   ).run({ accountId })
 
   try {
-    const stats = await syncAccountMailbox(accountId, mode)
+    const account = getAccount(accountId)
+    if (!account) throw new Error(`Account not found: ${accountId}`)
+    const stats =
+      account.receiveProtocol === 'pop3'
+        ? await syncPop3Account(accountId)
+        : await syncAccountMailbox(accountId, mode)
     db.prepare(
       `
       UPDATE onemail_sync_runs

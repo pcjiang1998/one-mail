@@ -1,4 +1,12 @@
-import { createHash, createHmac, randomUUID } from 'node:crypto'
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  createHmac,
+  randomBytes,
+  randomUUID,
+  scryptSync
+} from 'node:crypto'
 import type {
   BackupSyncDownloadResult,
   BackupSyncSettings,
@@ -25,6 +33,7 @@ type RemoteDownload = {
 
 const EMPTY_SHA256 = sha256('')
 const CONNECTION_TEST_BODY = 'OneMail backup sync connection test\n'
+const ENCRYPTED_BACKUP_HEADER = 'ONEMAIL-REMOTE-BACKUP-V2\n'
 
 export async function testBackupSync(input: BackupSyncSettings): Promise<BackupSyncTestResult> {
   const settings = resolveBackupSyncSettingsForMain(input)
@@ -45,10 +54,11 @@ export async function testBackupSync(input: BackupSyncSettings): Promise<BackupS
 export async function uploadBackupSync(): Promise<BackupSyncTransferResult> {
   const settings = requireBackupSyncSettings()
   const backup = createDatabaseSqlBackup()
+  const protectedBackup = protectRemoteBackup(backup.sql, requireReadKey(settings))
   const remotePath =
     settings.provider === 'webdav'
-      ? await uploadWebDavBackup(settings, backup.sql)
-      : await uploadS3Backup(settings, backup.sql)
+      ? await uploadWebDavBackup(settings, protectedBackup)
+      : await uploadS3Backup(settings, protectedBackup)
 
   return {
     provider: settings.provider,
@@ -91,7 +101,8 @@ async function downloadBackupSyncWithSettings(
     settings.provider === 'webdav'
       ? await downloadWebDavBackup(settings)
       : await downloadS3Backup(settings)
-  const imported = importDatabaseSqlBackupContent(remote.sql, remote.sourceName, {
+  const sql = unprotectRemoteBackup(remote.sql, requireReadKey(settings))
+  const imported = importDatabaseSqlBackupContent(sql, remote.sourceName, {
     source: settings.provider,
     remotePath: remote.remotePath,
     reportProgress
@@ -101,6 +112,53 @@ async function downloadBackupSyncWithSettings(
     ...imported,
     provider: settings.provider,
     remotePath: remote.remotePath
+  }
+}
+
+function requireReadKey(settings: ConfiguredBackupSyncSettings): string {
+  const readKey = settings.readKey?.trim()
+  if (!readKey) throw new Error('请先输入并保存数据读取密钥。')
+  return readKey
+}
+
+export function protectRemoteBackup(sql: string, readKey: string): string {
+  const salt = randomBytes(16)
+  const iv = randomBytes(12)
+  const key = scryptSync(readKey, salt, 32)
+  const cipher = createCipheriv('aes-256-gcm', key, iv)
+  const ciphertext = Buffer.concat([cipher.update(sql, 'utf8'), cipher.final()])
+  return `${ENCRYPTED_BACKUP_HEADER}${JSON.stringify({
+    version: 2,
+    algorithm: 'aes-256-gcm+scrypt',
+    salt: salt.toString('base64'),
+    iv: iv.toString('base64'),
+    authTag: cipher.getAuthTag().toString('base64'),
+    ciphertext: ciphertext.toString('base64')
+  })}`
+}
+
+export function unprotectRemoteBackup(value: string, readKey: string): string {
+  if (!value.startsWith(ENCRYPTED_BACKUP_HEADER)) {
+    throw new Error('远端备份不是受读取密钥保护的新格式；本版本不兼容旧版明文远端备份。')
+  }
+  try {
+    const payload = JSON.parse(value.slice(ENCRYPTED_BACKUP_HEADER.length)) as {
+      version: number
+      salt: string
+      iv: string
+      authTag: string
+      ciphertext: string
+    }
+    if (payload.version !== 2) throw new Error('unsupported version')
+    const key = scryptSync(readKey, Buffer.from(payload.salt, 'base64'), 32)
+    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(payload.iv, 'base64'))
+    decipher.setAuthTag(Buffer.from(payload.authTag, 'base64'))
+    return Buffer.concat([
+      decipher.update(Buffer.from(payload.ciphertext, 'base64')),
+      decipher.final()
+    ]).toString('utf8')
+  } catch {
+    throw new Error('数据读取密钥错误，或远端备份内容已损坏。')
   }
 }
 

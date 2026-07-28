@@ -14,6 +14,7 @@ import { createForwardDraft } from '../mail/forward-draft'
 import { createBulkForwardDraft } from '../mail/bulk-forward-draft'
 import { createMessageId } from '../mail/message-composer'
 import { createReplyDraft } from '../mail/reply-draft'
+import { resolveAccountSignature } from '../db/repositories/settings.repository'
 import { retryOutboxEmail, sendPlainTextEmail } from '../mail/smtp-send'
 import type {
   ComposeDraft,
@@ -29,6 +30,19 @@ import type {
 } from './types'
 
 export function registerComposeIpc(): void {
+  ipcMain.handle(
+    'compose/createNewDraft',
+    (_event, accountId: number) =>
+      ({
+        accountId,
+        mode: 'new',
+        to: [],
+        cc: [],
+        bcc: [],
+        subject: '',
+        bodyText: applySignature('', resolveAccountSignature(accountId))
+      }) satisfies ComposeDraft
+  )
   ipcMain.handle('compose/createReplyDraft', async (_event, input: ReplyDraftInput) => {
     const draft = await createReplyDraft(input.messageId, input.mode)
     return {
@@ -39,7 +53,7 @@ export function registerComposeIpc(): void {
       cc: draft.cc,
       bcc: draft.bcc,
       subject: draft.subject,
-      bodyText: draft.bodyText,
+      bodyText: applySignature(draft.bodyText, resolveAccountSignature(draft.accountId)),
       bodyHtml: undefined,
       inReplyTo: draft.inReplyTo,
       referencesHeader: draft.references
@@ -56,7 +70,7 @@ export function registerComposeIpc(): void {
       cc: draft.cc,
       bcc: draft.bcc,
       subject: draft.subject,
-      bodyText: draft.bodyText,
+      bodyText: applySignature(draft.bodyText, resolveAccountSignature(draft.accountId)),
       bodyHtml: undefined,
       forwardAttachments: draft.attachmentCandidates.map((attachment) => ({
         attachmentId: attachment.attachmentId,
@@ -68,9 +82,13 @@ export function registerComposeIpc(): void {
     } satisfies ComposeDraft
   })
 
-  ipcMain.handle('compose/createBulkForwardDraft', (_event, input: BulkForwardDraftInput) =>
-    createBulkForwardDraft(input.messageIds)
-  )
+  ipcMain.handle('compose/createBulkForwardDraft', async (_event, input: BulkForwardDraftInput) => {
+    const draft = await createBulkForwardDraft(input.messageIds)
+    return {
+      ...draft,
+      bodyText: applySignature(draft.bodyText, resolveAccountSignature(draft.accountId))
+    }
+  })
 
   ipcMain.handle('compose/send', async (_event, input: MailSendInput): Promise<MailSendResult> => {
     const result = await sendPlainTextEmail({
@@ -225,6 +243,22 @@ export function registerComposeIpc(): void {
     if (record.status === 'sending') throw new Error('发送中的记录不能直接删除。')
     return deleteOutboxRecord(outboxId)
   })
+}
+
+function applySignature(bodyText: string | undefined, signature: string | undefined): string {
+  const body = bodyText ?? ''
+  const content = signature?.trim()
+  if (!content) return body
+  const signatureBlock = `-- \n${content}`
+  const separatorMatch = /\n(?=(?:On .+ wrote:|---------- Forwarded message ----------))/i.exec(
+    body
+  )
+  if (!separatorMatch || separatorMatch.index < 0) {
+    return body.trim() ? `${body.trimEnd()}\n\n${signatureBlock}` : signatureBlock
+  }
+  const before = body.slice(0, separatorMatch.index).trimEnd()
+  const after = body.slice(separatorMatch.index).replace(/^\s*/, '')
+  return `${before}${before ? '\n\n' : ''}${signatureBlock}\n\n${after}`
 }
 
 function getImageMimeType(extension: string): string {

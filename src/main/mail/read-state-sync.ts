@@ -36,6 +36,10 @@ export async function syncMessageReadState(
     throw new Error(`Account not found: ${target.accountId}`)
   }
 
+  if (account.receiveProtocol === 'pop3') {
+    return updateMessageReadState(messageId, isRead)
+  }
+
   const client = await SimpleImapSession.connect(account, 'R')
 
   try {
@@ -79,6 +83,14 @@ export async function syncMessagesReadState(
           accountId: target.accountId,
           error: `Account not found: ${target.accountId}`
         })
+      }
+      continue
+    }
+
+    if (account.receiveProtocol === 'pop3') {
+      for (const target of group.targets) {
+        updates.push(updateMessageReadState(target.messageId, isRead))
+        succeededMessageIds.push(target.messageId)
       }
       continue
     }

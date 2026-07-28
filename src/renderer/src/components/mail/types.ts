@@ -1,9 +1,13 @@
 import type {
   AccountMailFolder,
+  AccountProxyMode,
+  AccountSyncMode,
   AuthType,
   ImapSecurity,
+  ReceiveProtocol,
   RemoteDeletePolicy,
-  SmtpSecurity
+  SmtpSecurity,
+  SignatureMode
 } from '../../../../shared/types'
 
 export type MailFilterTag = 'unread' | 'starred' | 'today' | 'yesterday' | 'last7'
@@ -13,6 +17,7 @@ export type Account = {
   accountId?: number
   providerKey?: string
   authType?: AuthType
+  receiveProtocol?: ReceiveProtocol
   imapHost?: string
   imapPort?: number
   imapSecurity?: ImapSecurity
@@ -20,6 +25,16 @@ export type Account = {
   smtpPort?: number
   smtpSecurity?: SmtpSecurity
   smtpEnabled?: boolean
+  popHost?: string
+  popPort?: number
+  popSecurity?: ImapSecurity
+  idleSupported?: boolean
+  proxyMode?: AccountProxyMode
+  customProxyUrl?: string
+  signatureMode?: SignatureMode
+  signatureId?: number
+  syncMode?: AccountSyncMode
+  accountSyncIntervalMinutes?: number
   remoteDeletePolicy?: RemoteDeletePolicy
   folders?: AccountMailFolder[]
   name: string

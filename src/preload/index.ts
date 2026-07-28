@@ -40,6 +40,7 @@ const api = {
     restore: (messageId) => ipcRenderer.invoke('messages/restore', messageId)
   },
   compose: {
+    createNewDraft: (accountId) => ipcRenderer.invoke('compose/createNewDraft', accountId),
     createReplyDraft: (input) => ipcRenderer.invoke('compose/createReplyDraft', input),
     createForwardDraft: (input) => ipcRenderer.invoke('compose/createForwardDraft', input),
     createBulkForwardDraft: (input) => ipcRenderer.invoke('compose/createBulkForwardDraft', input),
@@ -78,6 +79,9 @@ const api = {
   settings: {
     get: () => ipcRenderer.invoke('settings/get'),
     update: (input) => ipcRenderer.invoke('settings/update', input),
+    saveSignature: (input) => ipcRenderer.invoke('settings/saveSignature', input),
+    deleteSignature: (signatureId) => ipcRenderer.invoke('settings/deleteSignature', signatureId),
+    cleanupCache: (days) => ipcRenderer.invoke('settings/cleanupCache', days),
     getBackupSync: () => ipcRenderer.invoke('settings/getBackupSync'),
     updateBackupSync: (input) => ipcRenderer.invoke('settings/updateBackupSync', input),
     testBackupSync: (input) => ipcRenderer.invoke('settings/testBackupSync', input),

@@ -11,6 +11,8 @@ import {
 } from '@renderer/components/ui/select'
 import { Input } from '@renderer/components/ui/input'
 import { Switch } from '@renderer/components/ui/switch'
+import { Checkbox } from '@renderer/components/ui/checkbox'
+import { Alert, AlertDescription } from '@renderer/components/ui/alert'
 import { useI18n } from '@renderer/lib/i18n'
 import type { AccountFormValues } from './account-form-types'
 import { AccountFormField } from './account-form-field'
@@ -23,6 +25,7 @@ type CustomImapAccountFormProps = {
 export function CustomImapAccountForm({ form }: CustomImapAccountFormProps): React.JSX.Element {
   const { t } = useI18n()
   const smtpEnabled = form.watch('smtpEnabled')
+  const usePopProtocol = form.watch('usePopProtocol')
 
   return (
     <>
@@ -32,56 +35,104 @@ export function CustomImapAccountForm({ form }: CustomImapAccountFormProps): Rea
         passwordPlaceholder={t('account.form.passwordPlaceholder')}
       />
 
+      <Controller
+        control={form.control}
+        name="usePopProtocol"
+        render={({ field }) => (
+          <label className="flex items-center gap-2 rounded-md border px-3 py-2.5 text-sm">
+            <Checkbox
+              checked={field.value}
+              onCheckedChange={(checked) => {
+                field.onChange(checked === true)
+                if (checked === true && !form.getValues('popHost')) {
+                  form.setValue('popPort', 995)
+                  form.setValue('popSecurity', 'ssl_tls')
+                }
+              }}
+            />
+            {t('account.form.usePopProtocol')}
+          </label>
+        )}
+      />
+
+      {usePopProtocol ? (
+        <Alert variant="warning">
+          <AlertDescription className="text-xs">
+            {t('account.form.popNoRealtimeWarning')}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
       <div className="grid gap-2.5 sm:grid-cols-[minmax(0,1fr)_112px]">
         <AccountFormField
-          id="imap-host"
-          label={t('account.form.imapHost')}
+          id={usePopProtocol ? 'pop-host' : 'imap-host'}
+          label={t(usePopProtocol ? 'account.form.popHost' : 'account.form.imapHost')}
           required
-          error={form.formState.errors.imapHost?.message}
+          error={
+            usePopProtocol
+              ? form.formState.errors.popHost?.message
+              : form.formState.errors.imapHost?.message
+          }
         >
           <Input
-            id="imap-host"
-            placeholder="imap.example.com"
+            id={usePopProtocol ? 'pop-host' : 'imap-host'}
+            placeholder={usePopProtocol ? 'pop.example.com' : 'imap.example.com'}
             required
-            aria-invalid={Boolean(form.formState.errors.imapHost)}
-            {...form.register('imapHost')}
+            aria-invalid={Boolean(
+              usePopProtocol ? form.formState.errors.popHost : form.formState.errors.imapHost
+            )}
+            {...form.register(usePopProtocol ? 'popHost' : 'imapHost')}
           />
         </AccountFormField>
 
         <AccountFormField
-          id="imap-port"
+          id={usePopProtocol ? 'pop-port' : 'imap-port'}
           label={t('account.form.port')}
           required
-          error={form.formState.errors.imapPort?.message}
+          error={
+            usePopProtocol
+              ? form.formState.errors.popPort?.message
+              : form.formState.errors.imapPort?.message
+          }
         >
           <Input
-            id="imap-port"
+            id={usePopProtocol ? 'pop-port' : 'imap-port'}
             type="number"
             min={1}
             max={65535}
             required
-            aria-invalid={Boolean(form.formState.errors.imapPort)}
-            {...form.register('imapPort', { valueAsNumber: true })}
+            aria-invalid={Boolean(
+              usePopProtocol ? form.formState.errors.popPort : form.formState.errors.imapPort
+            )}
+            {...form.register(usePopProtocol ? 'popPort' : 'imapPort', { valueAsNumber: true })}
           />
         </AccountFormField>
       </div>
 
       <AccountFormField
-        id="imap-security"
+        id={usePopProtocol ? 'pop-security' : 'imap-security'}
         label={t('account.form.security')}
         required
-        error={form.formState.errors.imapSecurity?.message}
+        error={
+          usePopProtocol
+            ? form.formState.errors.popSecurity?.message
+            : form.formState.errors.imapSecurity?.message
+        }
       >
         <Controller
           control={form.control}
-          name="imapSecurity"
+          name={usePopProtocol ? 'popSecurity' : 'imapSecurity'}
           render={({ field }) => (
             <Select value={field.value} onValueChange={field.onChange} required>
               <SelectTrigger
-                id="imap-security"
+                id={usePopProtocol ? 'pop-security' : 'imap-security'}
                 className="w-full"
                 aria-label={t('account.form.security')}
-                aria-invalid={Boolean(form.formState.errors.imapSecurity)}
+                aria-invalid={Boolean(
+                  usePopProtocol
+                    ? form.formState.errors.popSecurity
+                    : form.formState.errors.imapSecurity
+                )}
               >
                 <SelectValue placeholder={t('account.form.security')} />
               </SelectTrigger>

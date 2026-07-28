@@ -16,7 +16,7 @@ OneMail 是一个本地优先的桌面邮件客户端，使用 Electron + React 
 
 **语言**：中文 | [English](./README.en.md)
 
-**项目主页 / 下载页**：[https://github.com/pcjiang1998/one-mail](https://github.com/pcjiang1998/one-mail)
+**项目主页 / 下载页**：[https://github.com/pcjiang1998/one-mail-next](https://github.com/pcjiang1998/one-mail-next)
 
 本软件基于 [one-mail](https://github.com/zhihui-hu/one-mail) 项目修改。原项目版权所有者为 [zhihui-hu](https://github.com/zhihui-hu)，修改者为 [pcjiang1998](https://github.com/pcjiang1998)。本软件按照 GNU Affero General Public License v3.0 发布。
 

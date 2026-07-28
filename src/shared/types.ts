@@ -12,6 +12,13 @@ export type CredentialState = 'pending' | 'stored' | 'invalid' | 'expired' | 're
 export type OAuthAuthorizationMode = 'internal_browser' | 'copy_link'
 export type SyncMode = 'initial' | 'refresh'
 export type RemoteDeletePolicy = 'inherit' | 'enabled' | 'disabled'
+export type ReceiveProtocol = 'imap' | 'pop3'
+export type ProxyMode = 'none' | 'system' | 'custom'
+export type AccountProxyMode = 'global' | ProxyMode
+export type SignatureMode = 'global' | 'none' | 'custom'
+export type GlobalSyncMode = 'idle' | 'interval' | 'manual'
+export type FallbackSyncMode = 'interval' | 'manual'
+export type AccountSyncMode = 'global' | 'fallback' | 'idle' | 'interval' | 'manual'
 
 export type MailAccount = {
   accountId: number
@@ -20,6 +27,7 @@ export type MailAccount = {
   displayName?: string
   accountLabel?: string
   authType: AuthType
+  receiveProtocol: ReceiveProtocol
   imapHost: string
   imapPort: number
   imapSecurity: ImapSecurity
@@ -28,6 +36,16 @@ export type MailAccount = {
   smtpSecurity?: SmtpSecurity
   smtpAuthType?: AuthType
   smtpEnabled: boolean
+  popHost?: string
+  popPort?: number
+  popSecurity?: ImapSecurity
+  idleSupported?: boolean
+  proxyMode: AccountProxyMode
+  customProxyUrl?: string
+  signatureMode: SignatureMode
+  signatureId?: number
+  syncMode: AccountSyncMode
+  accountSyncIntervalMinutes: number
   syncEnabled: boolean
   credentialState: CredentialState
   status: AccountStatus
@@ -43,6 +61,7 @@ export type AccountCreateInput = {
   password?: string
   accountLabel?: string
   authType: AuthType
+  receiveProtocol?: ReceiveProtocol
   oauthAuthorizationMode?: OAuthAuthorizationMode
   imapHost: string
   imapPort: number
@@ -52,6 +71,15 @@ export type AccountCreateInput = {
   smtpSecurity?: SmtpSecurity
   smtpAuthType?: AuthType
   smtpEnabled?: boolean
+  popHost?: string
+  popPort?: number
+  popSecurity?: ImapSecurity
+  proxyMode?: AccountProxyMode
+  customProxyUrl?: string
+  signatureMode?: SignatureMode
+  signatureId?: number
+  syncMode?: AccountSyncMode
+  accountSyncIntervalMinutes?: number
   remoteDeletePolicy?: RemoteDeletePolicy
 }
 
@@ -413,9 +441,36 @@ export type AppSettings = {
   externalImagesBlocked: boolean
   locale: string
   syncDeleteToRemote: boolean
+  globalProxyMode: ProxyMode
+  globalProxyUrl?: string
+  globalSignatureId: number | null
+  globalSyncMode: GlobalSyncMode
+  globalSyncIntervalMinutes: number
+  fallbackSyncMode: FallbackSyncMode
+  fallbackSyncIntervalMinutes: number
+  signatures: MailSignature[]
 }
 
 export type SettingsUpdateInput = Partial<AppSettings>
+
+export type MailSignature = {
+  signatureId: number
+  title: string
+  content: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type MailSignatureInput = {
+  signatureId?: number
+  title: string
+  content: string
+}
+
+export type CacheCleanupResult = {
+  days: number
+  deletedMessages: number
+}
 
 export type BackupSyncProvider = 'none' | 'webdav' | 's3'
 
@@ -429,6 +484,8 @@ export type BackupSyncSettings =
       username?: string
       password?: string
       passwordConfigured?: boolean
+      readKey?: string
+      readKeyConfigured?: boolean
     }
   | {
       provider: 's3'
@@ -439,6 +496,8 @@ export type BackupSyncSettings =
       accessKeyId: string
       secretAccessKey?: string
       secretAccessKeyConfigured?: boolean
+      readKey?: string
+      readKeyConfigured?: boolean
     }
 
 export type BackupSyncTransferResult = {
@@ -565,6 +624,7 @@ export type OneMailApi = {
     restore: (messageId: number) => Promise<MessageRestoreResult>
   }
   compose: {
+    createNewDraft: (accountId: number) => Promise<ComposeDraft>
     createReplyDraft: (input: ReplyDraftInput) => Promise<ComposeDraft>
     createForwardDraft: (input: ForwardDraftInput) => Promise<ComposeDraft>
     createBulkForwardDraft: (input: BulkForwardDraftInput) => Promise<ComposeDraft>
@@ -591,6 +651,9 @@ export type OneMailApi = {
   settings: {
     get: () => Promise<AppSettings>
     update: (input: SettingsUpdateInput) => Promise<AppSettings>
+    saveSignature: (input: MailSignatureInput) => Promise<MailSignature>
+    deleteSignature: (signatureId: number) => Promise<boolean>
+    cleanupCache: (days: number) => Promise<CacheCleanupResult>
     getBackupSync: () => Promise<BackupSyncSettings>
     updateBackupSync: (input: BackupSyncSettings) => Promise<BackupSyncSettings>
     testBackupSync: (input: BackupSyncSettings) => Promise<BackupSyncTestResult>

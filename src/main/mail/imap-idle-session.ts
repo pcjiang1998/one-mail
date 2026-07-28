@@ -1,6 +1,7 @@
-import { Socket, connect as connectTcp } from 'node:net'
+import { Socket } from 'node:net'
 import { TLSSocket, connect as connectTls } from 'node:tls'
 import type { getAccount } from '../db/repositories/account.repository'
+import { connectMailSocket } from '../services/network-proxy'
 import { toImapConnectionError } from './imap-errors'
 
 type TestSocket = Socket | TLSSocket
@@ -37,18 +38,12 @@ export class ImapIdleSession {
   }
 
   static async connect(account: ImapAccount): Promise<ImapIdleSession> {
-    const socket =
+    const socket = await connectMailSocket(
+      account,
+      account.imapHost,
+      account.imapPort,
       account.imapSecurity === 'ssl_tls'
-        ? connectTls({
-            host: account.imapHost,
-            port: account.imapPort,
-            servername: account.imapHost,
-            rejectUnauthorized: true
-          })
-        : connectTcp({
-            host: account.imapHost,
-            port: account.imapPort
-          })
+    )
 
     const session = new ImapIdleSession(socket)
     await session.waitForGreeting()

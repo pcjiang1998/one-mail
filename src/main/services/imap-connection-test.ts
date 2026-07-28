@@ -1,7 +1,8 @@
-import { Socket, connect as connectTcp } from 'node:net'
+import { Socket } from 'node:net'
 import { TLSSocket, connect as connectTls } from 'node:tls'
 import type { AccountCreateInput } from '../ipc/types'
 import { toImapConnectionError } from '../mail/imap-errors'
+import { connectMailSocket } from './network-proxy'
 
 const CONNECTION_TIMEOUT_MS = 10000
 const OAUTH_IMAP_AUTH_RETRY_DELAYS_MS = [1200, 2500, 5000]
@@ -14,7 +15,7 @@ const CLIENT_ID = {
   'support-email': 'support-onemail@huzhihui.com'
 }
 
-export async function testImapConnection(input: AccountCreateInput): Promise<void> {
+export async function testImapConnection(input: AccountCreateInput): Promise<boolean> {
   const email = input.email
   const password = normalizeInputPassword(input)
   if (!email) {
@@ -26,11 +27,10 @@ export async function testImapConnection(input: AccountCreateInput): Promise<voi
   }
 
   if (input.imapSecurity === 'ssl_tls') {
-    await testTlsConnection(input, email, password)
-    return
+    return testTlsConnection(input, email, password)
   }
 
-  await testPlainConnection(input, email, password)
+  return testPlainConnection(input, email, password)
 }
 
 function normalizeInputPassword(input: AccountCreateInput): string {
@@ -41,7 +41,7 @@ function normalizeInputPassword(input: AccountCreateInput): string {
 export async function testImapOAuthConnection(
   input: AccountCreateInput,
   accessToken: string
-): Promise<void> {
+): Promise<boolean> {
   const email = input.email
   if (!email) {
     throw new Error('Microsoft OAuth 未返回邮箱地址。')
@@ -50,11 +50,10 @@ export async function testImapOAuthConnection(
   for (let attempt = 0; attempt <= OAUTH_IMAP_AUTH_RETRY_DELAYS_MS.length; attempt += 1) {
     try {
       if (input.imapSecurity === 'ssl_tls') {
-        await testOAuthTlsConnection(input, email, accessToken)
+        return await testOAuthTlsConnection(input, email, accessToken)
       } else {
-        await testOAuthPlainConnection(input, email, accessToken)
+        return await testOAuthPlainConnection(input, email, accessToken)
       }
-      return
     } catch (error) {
       if (attempt >= OAUTH_IMAP_AUTH_RETRY_DELAYS_MS.length || !isOAuthImapAuthError(error)) {
         throw error
@@ -63,24 +62,19 @@ export async function testImapOAuthConnection(
       await wait(OAUTH_IMAP_AUTH_RETRY_DELAYS_MS[attempt])
     }
   }
+  return false
 }
 
 async function testTlsConnection(
   input: AccountCreateInput,
   email: string,
   password: string
-): Promise<void> {
-  const socket = connectTls({
-    host: input.imapHost,
-    port: input.imapPort,
-    servername: input.imapHost,
-    rejectUnauthorized: true
-  })
+): Promise<boolean> {
+  const socket = await connectMailSocket(input, input.imapHost, input.imapPort, true)
 
   try {
-    await waitForTlsConnect(socket)
     await waitForImapGreeting(socket)
-    await testLogin(socket, input, email, password)
+    return await testLogin(socket, input, email, password)
   } finally {
     socket.destroy()
   }
@@ -90,18 +84,12 @@ async function testOAuthTlsConnection(
   input: AccountCreateInput,
   email: string,
   accessToken: string
-): Promise<void> {
-  const socket = connectTls({
-    host: input.imapHost,
-    port: input.imapPort,
-    servername: input.imapHost,
-    rejectUnauthorized: true
-  })
+): Promise<boolean> {
+  const socket = await connectMailSocket(input, input.imapHost, input.imapPort, true)
 
   try {
-    await waitForTlsConnect(socket)
     await waitForImapGreeting(socket)
-    await testOAuthLogin(socket, email, accessToken)
+    return await testOAuthLogin(socket, email, accessToken)
   } finally {
     socket.destroy()
   }
@@ -111,14 +99,10 @@ async function testPlainConnection(
   input: AccountCreateInput,
   email: string,
   password: string
-): Promise<void> {
-  let socket: TestSocket = connectTcp({
-    host: input.imapHost,
-    port: input.imapPort
-  })
+): Promise<boolean> {
+  let socket: TestSocket = await connectMailSocket(input, input.imapHost, input.imapPort, false)
 
   try {
-    await waitForTcpConnect(socket)
     await waitForImapGreeting(socket)
 
     if (input.imapSecurity === 'starttls') {
@@ -126,7 +110,7 @@ async function testPlainConnection(
       await waitForTaggedOk(socket, 'A001', 'STARTTLS')
       socket = await upgradeToTls(socket, input.imapHost)
     }
-    await testLogin(socket, input, email, password)
+    return await testLogin(socket, input, email, password)
   } finally {
     socket.destroy()
   }
@@ -136,14 +120,10 @@ async function testOAuthPlainConnection(
   input: AccountCreateInput,
   email: string,
   accessToken: string
-): Promise<void> {
-  let socket: TestSocket = connectTcp({
-    host: input.imapHost,
-    port: input.imapPort
-  })
+): Promise<boolean> {
+  let socket: TestSocket = await connectMailSocket(input, input.imapHost, input.imapPort, false)
 
   try {
-    await waitForTcpConnect(socket)
     await waitForImapGreeting(socket)
 
     if (input.imapSecurity === 'starttls') {
@@ -151,7 +131,7 @@ async function testOAuthPlainConnection(
       await waitForTaggedOk(socket, 'A001', 'STARTTLS')
       socket = await upgradeToTls(socket, input.imapHost)
     }
-    await testOAuthLogin(socket, email, accessToken)
+    return await testOAuthLogin(socket, email, accessToken)
   } finally {
     socket.destroy()
   }
@@ -162,29 +142,71 @@ async function testLogin(
   input: AccountCreateInput,
   username: string,
   password: string
-): Promise<void> {
+): Promise<boolean> {
   await writeLine(socket, `A002 LOGIN ${quoteAtom(username)} ${quoteAtom(password)}`)
   await waitForTaggedOk(socket, 'A002', '登录认证', input)
   await identifyClient(socket, 'A003')
-  await writeLine(socket, 'A004 EXAMINE "INBOX"')
-  await waitForTaggedOk(socket, 'A004', '收件箱访问')
-  await writeLine(socket, 'A005 LOGOUT')
+  const capabilities = await readCapabilities(socket, 'A004')
+  await writeLine(socket, 'A005 EXAMINE "INBOX"')
+  await waitForTaggedOk(socket, 'A005', '收件箱访问')
+  await writeLine(socket, 'A006 LOGOUT')
+  return capabilities.has('IDLE')
 }
 
 async function testOAuthLogin(
   socket: TestSocket,
   username: string,
   accessToken: string
-): Promise<void> {
+): Promise<boolean> {
   await writeLine(
     socket,
     `A002 AUTHENTICATE XOAUTH2 ${formatXOAuth2Payload(username, accessToken)}`
   )
   await waitForTaggedOk(socket, 'A002', 'OAuth 登录认证')
   await identifyClient(socket, 'A003')
-  await writeLine(socket, 'A004 EXAMINE "INBOX"')
-  await waitForTaggedOk(socket, 'A004', '收件箱访问')
-  await writeLine(socket, 'A005 LOGOUT')
+  const capabilities = await readCapabilities(socket, 'A004')
+  await writeLine(socket, 'A005 EXAMINE "INBOX"')
+  await waitForTaggedOk(socket, 'A005', '收件箱访问')
+  await writeLine(socket, 'A006 LOGOUT')
+  return capabilities.has('IDLE')
+}
+
+async function readCapabilities(socket: TestSocket, tag: string): Promise<Set<string>> {
+  await writeLine(socket, `${tag} CAPABILITY`)
+  const response = await readUntilTagged(socket, tag)
+  const capabilities = new Set<string>()
+  for (const line of response.split(/\r?\n/)) {
+    const match = /^\*\s+CAPABILITY\s+(.+)$/i.exec(line.trim())
+    for (const value of match?.[1]?.split(/\s+/) ?? []) capabilities.add(value.toUpperCase())
+  }
+  return capabilities
+}
+
+function readUntilTagged(socket: TestSocket, tag: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let buffer = ''
+    const timeout = setTimeout(
+      () => finish(new Error('IMAP 服务器未返回能力信息。')),
+      CONNECTION_TIMEOUT_MS
+    )
+    const onData = (chunk: Buffer): void => {
+      buffer += chunk.toString('utf8')
+      if (new RegExp(`(^|\\r?\\n)${tag}\\s+(OK|NO|BAD)\\b`, 'i').test(buffer)) finish()
+    }
+    const onError = (error: Error): void => finish(toImapConnectionError(error))
+    const onClose = (): void => finish(new Error('IMAP 连接已断开。'))
+    function finish(error?: Error): void {
+      clearTimeout(timeout)
+      socket.off('data', onData)
+      socket.off('error', onError)
+      socket.off('close', onClose)
+      if (error) reject(error)
+      else resolve(buffer)
+    }
+    socket.on('data', onData)
+    socket.once('error', onError)
+    socket.once('close', onClose)
+  })
 }
 
 async function identifyClient(socket: TestSocket, tag: string): Promise<void> {
@@ -223,62 +245,6 @@ function upgradeToTls(socket: Socket, servername: string): Promise<TLSSocket> {
 
     tlsSocket.once('secureConnect', handleSecureConnect)
     tlsSocket.once('error', handleError)
-  })
-}
-
-function waitForTcpConnect(socket: Socket): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup()
-      reject(new Error('连接 IMAP 服务器超时，请检查服务器地址和端口。'))
-    }, CONNECTION_TIMEOUT_MS)
-
-    function cleanup(): void {
-      clearTimeout(timeout)
-      socket.off('connect', handleConnect)
-      socket.off('error', handleError)
-    }
-
-    function handleConnect(): void {
-      cleanup()
-      resolve()
-    }
-
-    function handleError(error: Error): void {
-      cleanup()
-      reject(toImapConnectionError(error))
-    }
-
-    socket.once('connect', handleConnect)
-    socket.once('error', handleError)
-  })
-}
-
-function waitForTlsConnect(socket: TLSSocket): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      cleanup()
-      reject(new Error('连接 IMAP 服务器超时，请检查服务器地址和端口。'))
-    }, CONNECTION_TIMEOUT_MS)
-
-    function cleanup(): void {
-      clearTimeout(timeout)
-      socket.off('secureConnect', handleSecureConnect)
-      socket.off('error', handleError)
-    }
-
-    function handleSecureConnect(): void {
-      cleanup()
-      resolve()
-    }
-
-    function handleError(error: Error): void {
-      cleanup()
-      reject(toImapConnectionError(error))
-    }
-
-    socket.once('secureConnect', handleSecureConnect)
-    socket.once('error', handleError)
   })
 }
 
@@ -403,11 +369,7 @@ function sanitizeImapResponse(value: string): string {
     .slice(0, 240)
 }
 
-function formatImapActionError(
-  action: string,
-  line: string,
-  input?: AccountCreateInput
-): string {
+function formatImapActionError(action: string, line: string, input?: AccountCreateInput): string {
   if (action === '登录认证' && input && isNetease163Input(input)) {
     return [
       '163 邮箱登录认证失败：网易拒绝了当前账号或授权码。',
@@ -469,11 +431,7 @@ function isAliyunInput(input: AccountCreateInput): boolean {
   const imapHost = input.imapHost.toLowerCase()
   const email = input.email?.toLowerCase() ?? ''
 
-  return (
-    providerKey === 'aliyun' ||
-    imapHost === 'imap.aliyun.com' ||
-    email.endsWith('@aliyun.com')
-  )
+  return providerKey === 'aliyun' || imapHost === 'imap.aliyun.com' || email.endsWith('@aliyun.com')
 }
 
 function isAliyunEnterpriseInput(input: AccountCreateInput): boolean {

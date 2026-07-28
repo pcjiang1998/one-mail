@@ -1,6 +1,6 @@
 import * as React from 'react'
 
-import { Field, FieldLabel } from '@renderer/components/ui/field'
+import { Field, FieldDescription, FieldLabel } from '@renderer/components/ui/field'
 import { Input } from '@renderer/components/ui/input'
 import {
   Select,
@@ -151,6 +151,23 @@ export function BackupSyncFields({
           </div>
         </div>
       ) : null}
+
+      {draft.provider !== 'none' ? (
+        <BackupTextField
+          id={`${idPrefix}-read-key`}
+          label={t('settings.backup.readKey')}
+          description={t('settings.backup.readKeyDescription')}
+          value={draft.readKey ?? ''}
+          type="password"
+          placeholder={
+            draft.readKeyConfigured
+              ? t('settings.backup.secretKeepPlaceholder')
+              : t('settings.backup.readKeyPlaceholder')
+          }
+          disabled={disabled}
+          onChange={(value) => onChange({ ...draft, readKey: value })}
+        />
+      ) : null}
     </div>
   )
 }
@@ -160,6 +177,7 @@ function BackupTextField({
   label,
   value,
   placeholder,
+  description,
   type = 'text',
   disabled,
   onChange
@@ -168,6 +186,7 @@ function BackupTextField({
   label: string
   value: string
   placeholder?: string
+  description?: string
   type?: React.HTMLInputTypeAttribute
   disabled?: boolean
   onChange: (value: string) => void
@@ -185,6 +204,7 @@ function BackupTextField({
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
       />
+      {description ? <FieldDescription>{description}</FieldDescription> : null}
     </Field>
   )
 }

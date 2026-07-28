@@ -59,7 +59,7 @@ export async function loadMessageBodyFromImap(messageId: number): Promise<MailMe
     await client.selectMailbox(locator.folder_path)
     const rawMessage = await client.fetchRawMessage(locator.uid)
     const parsed = parseMimeMessage(rawMessage)
-    const body = persistMessageBody(messageId, parsed)
+    const body = persistMessageBody(messageId, parsed, rawMessage)
     return body
   } catch (error) {
     db.prepare(
@@ -99,7 +99,15 @@ function getMessageLocator(messageId: number): MessageLocator | null {
   return row ?? null
 }
 
-function persistMessageBody(messageId: number, parsed: ParsedMessageBody): MailMessageBody {
+export function persistRawMessageBody(messageId: number, rawMessage: string): MailMessageBody {
+  return persistMessageBody(messageId, parseMimeMessage(rawMessage), rawMessage)
+}
+
+function persistMessageBody(
+  messageId: number,
+  parsed: ParsedMessageBody,
+  rawSource?: string
+): MailMessageBody {
   const bodyText = normalizeMailBodyText(parsed.text)
   const bodyHtml = sanitizeHtml(parsed.html)
   const db = getDatabase()
@@ -107,6 +115,7 @@ function persistMessageBody(messageId: number, parsed: ParsedMessageBody): MailM
     messageId,
     bodyText: bodyText ?? null,
     bodyHtml: bodyHtml ?? null,
+    rawSource: rawSource ?? null,
     externalImagesBlocked: 1
   }
 
@@ -116,6 +125,7 @@ function persistMessageBody(messageId: number, parsed: ParsedMessageBody): MailM
       message_id,
       body_text,
       body_html_sanitized,
+      raw_source,
       external_images_blocked,
       sanitized_at
     )
@@ -123,12 +133,14 @@ function persistMessageBody(messageId: number, parsed: ParsedMessageBody): MailM
       :messageId,
       :bodyText,
       :bodyHtml,
+      :rawSource,
       :externalImagesBlocked,
       strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
     )
     ON CONFLICT(message_id) DO UPDATE SET
       body_text = excluded.body_text,
       body_html_sanitized = excluded.body_html_sanitized,
+      raw_source = COALESCE(excluded.raw_source, onemail_message_bodies.raw_source),
       external_images_blocked = excluded.external_images_blocked,
       sanitized_at = excluded.sanitized_at,
       loaded_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),

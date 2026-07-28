@@ -20,9 +20,16 @@ export async function appendMessageToSentFolder(
 ): Promise<SentAppendResult> {
   const account = getAccount(accountId)
   if (!account) return { appended: false, warning: `Account not found: ${accountId}` }
+  if (account.receiveProtocol === 'pop3') {
+    return {
+      appended: false,
+      warning: 'POP3 协议不支持将已发送邮件追加到远端文件夹。'
+    }
+  }
 
   const sentFolder = findSentFolder(accountId)
-  if (!sentFolder) return { appended: false, warning: '未找到 Sent/已发送 文件夹，已跳过远端追加。' }
+  if (!sentFolder)
+    return { appended: false, warning: '未找到 Sent/已发送 文件夹，已跳过远端追加。' }
 
   let session: SimpleImapSession | undefined
 

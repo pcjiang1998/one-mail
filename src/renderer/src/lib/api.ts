@@ -14,9 +14,12 @@ import type {
   BackupSyncTestResult,
   BackupSyncTransferResult,
   BackupImportResult,
+  CacheCleanupResult,
   AttachmentDownloadResult,
   ComposeDraft as SharedComposeDraft,
   MailAccount,
+  MailSignature,
+  MailSignatureInput,
   MailAddressInput,
   MailAttachmentInput,
   MailMessageDetail,
@@ -251,6 +254,18 @@ export async function saveSettings(input: SettingsUpdateInput): Promise<AppSetti
   return window.api.settings.update(input)
 }
 
+export async function saveMailSignature(input: MailSignatureInput): Promise<MailSignature> {
+  return window.api.settings.saveSignature(input)
+}
+
+export async function deleteMailSignature(signatureId: number): Promise<boolean> {
+  return window.api.settings.deleteSignature(signatureId)
+}
+
+export async function cleanupMailCache(days: number): Promise<CacheCleanupResult> {
+  return window.api.settings.cleanupCache(days)
+}
+
 export async function exportSqlBackup(): Promise<string | null> {
   return window.api.settings.exportSql()
 }
@@ -436,7 +451,7 @@ export async function createComposeDraft(input: ComposeDraftInput): Promise<Comp
     )
   }
 
-  return createLocalDraft(input)
+  return toUiComposeDraft(await compose.createNewDraft(input.accountId))
 }
 
 export async function createBulkForwardComposeDraft(messageIds: number[]): Promise<ComposeDraft> {
@@ -548,6 +563,7 @@ function toAccountList(accounts: MailAccount[], accountStats: AccountMailboxStat
       accountId: account.accountId,
       providerKey: account.providerKey,
       authType: account.authType,
+      receiveProtocol: account.receiveProtocol,
       imapHost: account.imapHost,
       imapPort: account.imapPort,
       imapSecurity: account.imapSecurity,
@@ -555,6 +571,16 @@ function toAccountList(accounts: MailAccount[], accountStats: AccountMailboxStat
       smtpPort: account.smtpPort,
       smtpSecurity: account.smtpSecurity,
       smtpEnabled: account.smtpEnabled,
+      popHost: account.popHost,
+      popPort: account.popPort,
+      popSecurity: account.popSecurity,
+      idleSupported: account.idleSupported,
+      proxyMode: account.proxyMode,
+      customProxyUrl: account.customProxyUrl,
+      signatureMode: account.signatureMode,
+      signatureId: account.signatureId,
+      syncMode: account.syncMode,
+      accountSyncIntervalMinutes: account.accountSyncIntervalMinutes,
       remoteDeletePolicy: account.remoteDeletePolicy,
       folders: account.folders,
       name: formatAccountName(account),
@@ -651,20 +677,6 @@ function toMessage(message: MailMessageSummary | MailMessageDetail): Message {
         : message.hasAttachments
           ? [{ name: '', size: ATTACHMENT_METADATA_PENDING_SIZE, type: '' }]
           : []
-  }
-}
-
-function createLocalDraft(input: ComposeDraftInput): ComposeDraft {
-  return {
-    kind: input.kind,
-    accountId: input.accountId,
-    relatedMessageId: input.relatedMessageId,
-    to: [],
-    cc: [],
-    bcc: [],
-    subject: '',
-    bodyText: '',
-    bodyHtml: undefined
   }
 }
 

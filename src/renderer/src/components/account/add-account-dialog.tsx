@@ -5,6 +5,7 @@ import { Controller, useForm } from 'react-hook-form'
 import { ResponsiveDialog } from '@renderer/components/responsive-dialog'
 import { Alert, AlertDescription } from '@renderer/components/ui/alert'
 import { Button } from '@renderer/components/ui/button'
+import { Input } from '@renderer/components/ui/input'
 import { FieldError, FieldGroup } from '@renderer/components/ui/field'
 import { useI18n } from '@renderer/lib/i18n'
 import {
@@ -15,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue
 } from '@renderer/components/ui/select'
-import type { AccountCreateInput } from '../../../../shared/types'
+import type { AccountCreateInput, AppSettings } from '../../../../shared/types'
 import {
   createAccountSchema,
   defaultAccountFormValues,
@@ -29,6 +30,7 @@ import { AccountFormField } from './account-form-field'
 import { CommonAccountFields } from './common-account-fields'
 import { CustomImapAccountForm } from './custom-imap-account-form'
 import { OutlookAccountForm } from './outlook-account-form'
+import { AccountPreferenceFields } from './account-preference-fields'
 
 const ACCOUNT_ADD_GUIDE_URL =
   'https://huzhihui.com/blog/personal-email-account-add-guide-imap-smtp-app-password'
@@ -57,11 +59,19 @@ export function AddAccountForm({
   const [pending, setPending] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const [kind, setKind] = React.useState<AccountKind>(defaultAccountFormValues.kind)
+  const [settings, setSettings] = React.useState<AppSettings | null>(null)
   const form = useForm<AccountFormValues>({
     resolver: zodResolver(accountSchema),
     defaultValues: defaultAccountFormValues,
     mode: 'onSubmit'
   })
+
+  React.useEffect(() => {
+    void window.api.settings
+      .get()
+      .then(setSettings)
+      .catch(() => undefined)
+  }, [])
 
   function handleKindChange(nextKind: string): void {
     const preset = getProviderPreset(nextKind as AccountKind)
@@ -77,6 +87,7 @@ export function AddAccountForm({
     form.setValue('smtpPort', preset.smtpPort ?? 465)
     form.setValue('smtpSecurity', preset.smtpSecurity ?? 'ssl_tls')
     form.setValue('smtpEnabled', preset.smtpEnabled ?? false)
+    form.setValue('usePopProtocol', false)
     form.clearErrors()
     setError(null)
   }
@@ -104,12 +115,22 @@ export function AddAccountForm({
         smtpSecurity: values.kind === 'custom' ? values.smtpSecurity : preset.smtpSecurity,
         smtpAuthType: values.kind === 'custom' ? values.authType : preset.smtpAuthType,
         smtpEnabled: values.kind === 'custom' ? values.smtpEnabled : preset.smtpEnabled,
+        receiveProtocol: values.kind === 'custom' && values.usePopProtocol ? 'pop3' : 'imap',
+        popHost:
+          values.kind === 'custom' && values.usePopProtocol ? values.popHost?.trim() : undefined,
+        popPort: values.kind === 'custom' && values.usePopProtocol ? values.popPort : undefined,
+        popSecurity:
+          values.kind === 'custom' && values.usePopProtocol ? values.popSecurity : undefined,
+        proxyMode: values.proxyMode,
+        customProxyUrl: values.proxyMode === 'custom' ? values.customProxyUrl?.trim() : undefined,
+        signatureMode: values.signatureMode,
+        signatureId: values.signatureMode === 'custom' ? values.signatureId : undefined,
         remoteDeletePolicy: values.remoteDeletePolicy
       })
       form.reset(defaultAccountFormValues)
       setKind(defaultAccountFormValues.kind)
     } catch (submitError) {
-      setError(formatAccountSubmitError(submitError, t('account.add.saveError'), values.kind))
+      setError(formatAccountSubmitError(submitError, t('account.add.saveError'), values.kind, t))
     } finally {
       setPending(false)
     }
@@ -149,6 +170,8 @@ export function AddAccountForm({
 
         <FieldGroup className="gap-2.5">
           {renderProviderForm(kind, form, t)}
+          {kind === 'custom' ? null : <ProviderServerSummary kind={kind} />}
+          <AccountPreferenceFields form={form} signatures={settings?.signatures ?? []} />
           <AccountFormField
             id="account-remote-delete-policy"
             label={t('account.form.remoteDeletePolicy')}
@@ -185,6 +208,33 @@ export function AddAccountForm({
         </Button>
       </div>
     </form>
+  )
+}
+
+function ProviderServerSummary({ kind }: { kind: AccountKind }): React.JSX.Element {
+  const { t } = useI18n()
+  const preset = getProviderPreset(kind)
+  return (
+    <section className="grid gap-2 rounded-md border bg-muted/30 p-3 sm:grid-cols-2">
+      <AccountFormField id="preset-imap" label={t('account.form.imapSettings')}>
+        <Input
+          id="preset-imap"
+          value={`${preset.imapHost}:${preset.imapPort} (${preset.imapSecurity})`}
+          disabled
+        />
+      </AccountFormField>
+      <AccountFormField id="preset-smtp" label={t('account.form.smtpSettings')}>
+        <Input
+          id="preset-smtp"
+          value={
+            preset.smtpHost
+              ? `${preset.smtpHost}:${preset.smtpPort ?? ''} (${preset.smtpSecurity ?? ''})`
+              : t('account.form.smtpDisabled')
+          }
+          disabled
+        />
+      </AccountFormField>
+    </section>
   )
 }
 
@@ -276,7 +326,12 @@ function normalizePassword(value: string, authType: AccountCreateInput['authType
   return authType === 'app_password' ? password.replace(/\s+/g, '') : password
 }
 
-function formatAccountSubmitError(error: unknown, fallback: string, kind: AccountKind): string {
+function formatAccountSubmitError(
+  error: unknown,
+  fallback: string,
+  kind: AccountKind,
+  t: ReturnType<typeof useI18n>['t']
+): string {
   if (!(error instanceof Error)) return fallback
 
   const message = error.message
@@ -285,12 +340,7 @@ function formatAccountSubmitError(error: unknown, fallback: string, kind: Accoun
     .trim()
 
   if (kind === 'aliyunEnterprise' && /IMAP 登录认证失败：.*LOGIN failed/i.test(message)) {
-    return [
-      '阿里企业邮箱登录认证失败：服务器拒绝了当前账号或密码/专用密码。',
-      '请让管理员确认已允许使用三方客户端，并已为当前账号开启 IMAP/SMTP 服务；服务器为 imap.qiye.aliyun.com，SSL 端口 993。',
-      '如果企业强制启用或账号已开启三方客户端安全密码，请在网页端生成安全密码，并在这里填写该密码，不要使用网页登录密码。',
-      '如果企业限制了三方客户端安全登录 IP，请确认当前网络 IP 已被允许。'
-    ].join(' ')
+    return t('account.add.aliyunEnterpriseLoginError')
   }
 
   return message

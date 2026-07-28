@@ -1,7 +1,13 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
 import { getDatabase, getDatabaseKey } from '../connection'
 import { getOpenAtLogin, setOpenAtLogin } from '../../services/login-item'
-import type { AppSettings, BackupSyncSettings, SettingsUpdateInput } from '../../ipc/types'
+import type {
+  AppSettings,
+  BackupSyncSettings,
+  MailSignature,
+  MailSignatureInput,
+  SettingsUpdateInput
+} from '../../ipc/types'
 
 const defaultSettings: AppSettings = {
   syncIntervalMinutes: 15,
@@ -9,7 +15,14 @@ const defaultSettings: AppSettings = {
   openAtLogin: false,
   externalImagesBlocked: true,
   locale: 'zh-CN',
-  syncDeleteToRemote: true
+  syncDeleteToRemote: true,
+  globalProxyMode: 'none',
+  globalSignatureId: null,
+  globalSyncMode: 'idle',
+  globalSyncIntervalMinutes: 15,
+  fallbackSyncMode: 'interval',
+  fallbackSyncIntervalMinutes: 5,
+  signatures: []
 }
 
 const settingsDefinition = {
@@ -19,6 +32,13 @@ const settingsDefinition = {
   externalImagesBlocked: { key: 'external_images_blocked', type: 'boolean' },
   locale: { key: 'locale', type: 'string' },
   syncDeleteToRemote: { key: 'sync_delete_to_remote', type: 'boolean' },
+  globalProxyMode: { key: 'global_proxy_mode', type: 'string' },
+  globalProxyUrl: { key: 'global_proxy_url', type: 'string' },
+  globalSignatureId: { key: 'global_signature_id', type: 'number' },
+  globalSyncMode: { key: 'global_sync_mode', type: 'string' },
+  globalSyncIntervalMinutes: { key: 'global_sync_interval_minutes', type: 'number' },
+  fallbackSyncMode: { key: 'fallback_sync_mode', type: 'string' },
+  fallbackSyncIntervalMinutes: { key: 'fallback_sync_interval_minutes', type: 'number' },
   lastAttachmentDownloadDir: { key: 'last_attachment_download_dir', type: 'string' },
   backupSyncSettings: { key: 'backup_sync_settings', type: 'json' }
 } as const
@@ -63,13 +83,40 @@ export function getSettings(): AppSettings {
     syncDeleteToRemote: readBoolean(
       byKey.get(settingsDefinition.syncDeleteToRemote.key),
       defaultSettings.syncDeleteToRemote
-    )
+    ),
+    globalProxyMode: readEnum(
+      byKey.get(settingsDefinition.globalProxyMode.key),
+      ['none', 'system', 'custom'],
+      defaultSettings.globalProxyMode
+    ),
+    globalProxyUrl: optionalTrim(byKey.get(settingsDefinition.globalProxyUrl.key)?.setting_value),
+    globalSignatureId: readNullableNumber(byKey.get(settingsDefinition.globalSignatureId.key)),
+    globalSyncMode: readEnum(
+      byKey.get(settingsDefinition.globalSyncMode.key),
+      ['idle', 'interval', 'manual'],
+      defaultSettings.globalSyncMode
+    ),
+    globalSyncIntervalMinutes: readNumber(
+      byKey.get(settingsDefinition.globalSyncIntervalMinutes.key),
+      defaultSettings.globalSyncIntervalMinutes
+    ),
+    fallbackSyncMode: readEnum(
+      byKey.get(settingsDefinition.fallbackSyncMode.key),
+      ['interval', 'manual'],
+      defaultSettings.fallbackSyncMode
+    ),
+    fallbackSyncIntervalMinutes: readNumber(
+      byKey.get(settingsDefinition.fallbackSyncIntervalMinutes.key),
+      defaultSettings.fallbackSyncIntervalMinutes
+    ),
+    signatures: listSignatures()
   }
 }
 
 export function updateSettings(input: SettingsUpdateInput): AppSettings {
   const current = getSettings()
   const next: AppSettings = { ...current, ...input }
+  validateSettings(next)
 
   if (input.openAtLogin !== undefined) {
     setOpenAtLogin(next.openAtLogin)
@@ -101,6 +148,41 @@ export function updateSettings(input: SettingsUpdateInput): AppSettings {
     next.syncDeleteToRemote ? '1' : '0',
     settingsDefinition.syncDeleteToRemote.type
   )
+  writeSetting(
+    settingsDefinition.globalProxyMode.key,
+    next.globalProxyMode,
+    settingsDefinition.globalProxyMode.type
+  )
+  writeSetting(
+    settingsDefinition.globalProxyUrl.key,
+    optionalTrim(next.globalProxyUrl) ?? '',
+    settingsDefinition.globalProxyUrl.type
+  )
+  writeSetting(
+    settingsDefinition.globalSignatureId.key,
+    next.globalSignatureId === null ? '' : String(next.globalSignatureId),
+    settingsDefinition.globalSignatureId.type
+  )
+  writeSetting(
+    settingsDefinition.globalSyncMode.key,
+    next.globalSyncMode,
+    settingsDefinition.globalSyncMode.type
+  )
+  writeSetting(
+    settingsDefinition.globalSyncIntervalMinutes.key,
+    String(next.globalSyncIntervalMinutes),
+    settingsDefinition.globalSyncIntervalMinutes.type
+  )
+  writeSetting(
+    settingsDefinition.fallbackSyncMode.key,
+    next.fallbackSyncMode,
+    settingsDefinition.fallbackSyncMode.type
+  )
+  writeSetting(
+    settingsDefinition.fallbackSyncIntervalMinutes.key,
+    String(next.fallbackSyncIntervalMinutes),
+    settingsDefinition.fallbackSyncIntervalMinutes.type
+  )
 
   return getSettings()
 }
@@ -127,6 +209,99 @@ export function updateBackupSyncSettings(input: BackupSyncSettings): BackupSyncS
 
 export function resolveBackupSyncSettingsForMain(input: BackupSyncSettings): BackupSyncSettings {
   return normalizeBackupSyncSettings(input, readBackupSyncSettings())
+}
+
+export function listSignatures(): MailSignature[] {
+  return getDatabase()
+    .prepare<{
+      signature_id: number
+      title: string
+      content: string
+      created_at: string
+      updated_at: string
+    }>(
+      `SELECT signature_id, title, content, created_at, updated_at
+       FROM onemail_mail_signatures
+       ORDER BY title COLLATE NOCASE, signature_id`
+    )
+    .all()
+    .map((row) => ({
+      signatureId: Number(row.signature_id),
+      title: row.title,
+      content: row.content,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at
+    }))
+}
+
+export function saveSignature(input: MailSignatureInput): MailSignature {
+  const title = input.title.trim()
+  if (!title) throw new Error('请输入签名标题。')
+  if (/[<>]/.test(title)) throw new Error('签名标题不能包含 < 或 >。')
+  if (title.length > 80) throw new Error('签名标题不能超过 80 个字符。')
+
+  const db = getDatabase()
+  let signatureId = input.signatureId
+  if (signatureId) {
+    const result = db
+      .prepare(
+        `UPDATE onemail_mail_signatures
+         SET title = :title, content = :content,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE signature_id = :signatureId`
+      )
+      .run({ signatureId, title, content: input.content })
+    if (result.changes === 0) throw new Error('签名不存在。')
+  } else {
+    const result = db
+      .prepare(
+        `INSERT INTO onemail_mail_signatures (title, content)
+         VALUES (:title, :content)`
+      )
+      .run({ title, content: input.content })
+    signatureId = Number(result.lastInsertRowid)
+  }
+
+  const signature = listSignatures().find((item) => item.signatureId === signatureId)
+  if (!signature) throw new Error('保存签名失败。')
+  return signature
+}
+
+export function deleteSignature(signatureId: number): boolean {
+  const db = getDatabase()
+  db.prepare(
+    `UPDATE onemail_mail_accounts
+     SET signature_mode = CASE WHEN signature_id = :signatureId THEN 'global' ELSE signature_mode END,
+         signature_id = CASE WHEN signature_id = :signatureId THEN NULL ELSE signature_id END
+     WHERE signature_id = :signatureId`
+  ).run({ signatureId })
+  const result = db
+    .prepare('DELETE FROM onemail_mail_signatures WHERE signature_id = :signatureId')
+    .run({ signatureId })
+  const settings = getSettings()
+  if (settings.globalSignatureId === signatureId) {
+    writeSetting(
+      settingsDefinition.globalSignatureId.key,
+      '',
+      settingsDefinition.globalSignatureId.type
+    )
+  }
+  return result.changes > 0
+}
+
+export function resolveAccountSignature(accountId: number): string | undefined {
+  const settings = getSettings()
+  const row = getDatabase()
+    .prepare<{ signature_mode: string; signature_id: number | null }>(
+      `SELECT signature_mode, signature_id
+       FROM onemail_mail_accounts WHERE account_id = :accountId`
+    )
+    .get({ accountId })
+  if (!row || row.signature_mode === 'none') return undefined
+  const signatureId =
+    row.signature_mode === 'custom' ? Number(row.signature_id || 0) : settings.globalSignatureId
+  if (!signatureId) return undefined
+  return settings.signatures.find((item) => item.signatureId === signatureId)?.content
 }
 
 export function getLastAttachmentDownloadDir(): string | undefined {
@@ -176,6 +351,31 @@ function ensureDefaultSettings(): void {
     settingsDefinition.syncDeleteToRemote.key,
     defaultSettings.syncDeleteToRemote ? '1' : '0',
     settingsDefinition.syncDeleteToRemote.type
+  )
+  updateMissingSetting(
+    settingsDefinition.globalProxyMode.key,
+    defaultSettings.globalProxyMode,
+    settingsDefinition.globalProxyMode.type
+  )
+  updateMissingSetting(
+    settingsDefinition.globalSyncMode.key,
+    defaultSettings.globalSyncMode,
+    settingsDefinition.globalSyncMode.type
+  )
+  updateMissingSetting(
+    settingsDefinition.globalSyncIntervalMinutes.key,
+    String(defaultSettings.globalSyncIntervalMinutes),
+    settingsDefinition.globalSyncIntervalMinutes.type
+  )
+  updateMissingSetting(
+    settingsDefinition.fallbackSyncMode.key,
+    defaultSettings.fallbackSyncMode,
+    settingsDefinition.fallbackSyncMode.type
+  )
+  updateMissingSetting(
+    settingsDefinition.fallbackSyncIntervalMinutes.key,
+    String(defaultSettings.fallbackSyncIntervalMinutes),
+    settingsDefinition.fallbackSyncIntervalMinutes.type
   )
 }
 
@@ -235,7 +435,8 @@ function normalizeStoredBackupSyncSettings(settings: BackupSyncSettings): Backup
       provider: 'webdav',
       remoteUrl: settings.remoteUrl,
       username: settings.username,
-      password: settings.password
+      password: settings.password,
+      readKey: settings.readKey
     }
   }
 
@@ -247,7 +448,8 @@ function normalizeStoredBackupSyncSettings(settings: BackupSyncSettings): Backup
       bucket: settings.bucket,
       key: settings.key,
       accessKeyId: settings.accessKeyId,
-      secretAccessKey: settings.secretAccessKey
+      secretAccessKey: settings.secretAccessKey,
+      readKey: settings.readKey
     }
   }
 
@@ -269,6 +471,9 @@ function normalizeBackupSyncSettings(
       password: normalizeSecret(
         input.password,
         current.provider === 'webdav' ? current.password : undefined
+      ),
+      readKey: requireReadKey(
+        normalizeSecret(input.readKey, current.provider === 'webdav' ? current.readKey : undefined)
       )
     }
   }
@@ -293,7 +498,10 @@ function normalizeBackupSyncSettings(
       bucket: requireTrimmed(input.bucket, '请输入 S3 Bucket。'),
       key: requireTrimmed(input.key, '请输入 S3 对象路径。'),
       accessKeyId: requireTrimmed(input.accessKeyId, '请输入 S3 Access Key ID。'),
-      secretAccessKey
+      secretAccessKey,
+      readKey: requireReadKey(
+        normalizeSecret(input.readKey, current.provider === 's3' ? current.readKey : undefined)
+      )
     }
   }
 
@@ -306,7 +514,8 @@ function redactBackupSyncSettings(settings: BackupSyncSettings): BackupSyncSetti
       provider: 'webdav',
       remoteUrl: settings.remoteUrl,
       username: settings.username,
-      passwordConfigured: Boolean(settings.password)
+      passwordConfigured: Boolean(settings.password),
+      readKeyConfigured: Boolean(settings.readKey)
     }
   }
 
@@ -318,7 +527,8 @@ function redactBackupSyncSettings(settings: BackupSyncSettings): BackupSyncSetti
       bucket: settings.bucket,
       key: settings.key,
       accessKeyId: settings.accessKeyId,
-      secretAccessKeyConfigured: Boolean(settings.secretAccessKey)
+      secretAccessKeyConfigured: Boolean(settings.secretAccessKey),
+      readKeyConfigured: Boolean(settings.readKey)
     }
   }
 
@@ -344,6 +554,11 @@ function normalizeSecret(
   return nextSecret ?? currentValue
 }
 
+function requireReadKey(value: string | undefined): string {
+  if (!value || value.length < 8) throw new Error('数据读取密钥至少需要 8 个字符。')
+  return value
+}
+
 function validateHttpUrl(value: string, label: string): void {
   let url: URL
   try {
@@ -354,6 +569,56 @@ function validateHttpUrl(value: string, label: string): void {
 
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
     throw new Error(`${label} 只支持 http 或 https。`)
+  }
+}
+
+function validateSettings(settings: AppSettings): void {
+  validateIntegerRange(settings.syncIntervalMinutes, 0, 1440, '同步间隔')
+  validateIntegerRange(settings.syncWindowDays, 0, 3650, '缓存窗口')
+  validateIntegerRange(settings.globalSyncIntervalMinutes, 1, 1440, '全局同步间隔')
+  validateIntegerRange(settings.fallbackSyncIntervalMinutes, 1, 1440, '回退同步间隔')
+
+  if (!['zh-CN', 'en-US'].includes(settings.locale)) throw new Error('不支持的界面语言。')
+  if (!['none', 'system', 'custom'].includes(settings.globalProxyMode)) {
+    throw new Error('不支持的全局代理模式。')
+  }
+  if (!['idle', 'interval', 'manual'].includes(settings.globalSyncMode)) {
+    throw new Error('不支持的全局同步模式。')
+  }
+  if (!['interval', 'manual'].includes(settings.fallbackSyncMode)) {
+    throw new Error('不支持的回退同步模式。')
+  }
+
+  if (settings.globalProxyMode === 'custom') {
+    validateSocks5Url(settings.globalProxyUrl)
+  }
+  if (
+    settings.globalSignatureId !== null &&
+    !getDatabase()
+      .prepare('SELECT 1 FROM onemail_mail_signatures WHERE signature_id = :signatureId')
+      .get({ signatureId: settings.globalSignatureId })
+  ) {
+    throw new Error('选择的全局签名不存在。')
+  }
+}
+
+function validateIntegerRange(value: number, min: number, max: number, label: string): void {
+  if (!Number.isInteger(value) || value < min || value > max) {
+    throw new Error(`${label}必须是 ${min} 到 ${max} 之间的整数。`)
+  }
+}
+
+function validateSocks5Url(value?: string): void {
+  const proxyUrl = value?.trim()
+  if (!proxyUrl) throw new Error('请输入 SOCKS5 代理地址。')
+  let parsed: URL
+  try {
+    parsed = new URL(proxyUrl)
+  } catch {
+    throw new Error('SOCKS5 代理地址格式无效。')
+  }
+  if (parsed.protocol !== 'socks5:' || !parsed.hostname || !parsed.port) {
+    throw new Error('SOCKS5 代理地址必须包含 socks5://、主机和端口。')
   }
 }
 
@@ -407,4 +672,19 @@ function readNumber(row: SettingRow | undefined, fallback: number): number {
 function readBoolean(row: SettingRow | undefined, fallback: boolean): boolean {
   if (!row) return fallback
   return row.setting_value === '1' || row.setting_value === 'true'
+}
+
+function readNullableNumber(row: SettingRow | undefined): number | null {
+  if (!row?.setting_value.trim()) return null
+  const value = Number(row.setting_value)
+  return Number.isInteger(value) && value > 0 ? value : null
+}
+
+function readEnum<T extends string>(
+  row: SettingRow | undefined,
+  allowed: readonly T[],
+  fallback: T
+): T {
+  const value = row?.setting_value as T | undefined
+  return value && allowed.includes(value) ? value : fallback
 }

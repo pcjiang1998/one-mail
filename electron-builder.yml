@@ -63,5 +63,5 @@ npmRebuild: false
 publish:
   provider: github
   owner: pcjiang1998
-  repo: one-mail
+  repo: one-mail-next
   releaseType: release

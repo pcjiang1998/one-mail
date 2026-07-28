@@ -1,10 +1,13 @@
 import { ipcMain, type WebContents } from 'electron'
 import {
+  deleteSignature,
   getBackupSyncSettings,
   getSettings,
+  saveSignature,
   updateBackupSyncSettings,
   updateSettings
 } from '../db/repositories/settings.repository'
+import { cleanupMessageCache } from '../db/repositories/cache.repository'
 import {
   downloadBackupSync,
   downloadBackupSyncFromSettings,
@@ -17,7 +20,12 @@ import {
   type BackupImportProgressReporter
 } from '../services/database-backup'
 import { refreshMailboxWatchers } from '../services/mailbox-watch'
-import type { BackupImportProgress, BackupSyncSettings, SettingsUpdateInput } from './types'
+import type {
+  BackupImportProgress,
+  BackupSyncSettings,
+  MailSignatureInput,
+  SettingsUpdateInput
+} from './types'
 
 export function registerSettingsIpc(): void {
   ipcMain.handle('settings/get', () => getSettings())
@@ -26,6 +34,13 @@ export function registerSettingsIpc(): void {
     refreshMailboxWatchers()
     return settings
   })
+  ipcMain.handle('settings/saveSignature', (_event, input: MailSignatureInput) =>
+    saveSignature(input)
+  )
+  ipcMain.handle('settings/deleteSignature', (_event, signatureId: number) =>
+    deleteSignature(signatureId)
+  )
+  ipcMain.handle('settings/cleanupCache', (_event, days: number) => cleanupMessageCache(days))
   ipcMain.handle('settings/getBackupSync', () => getBackupSyncSettings())
   ipcMain.handle('settings/updateBackupSync', (_event, input: BackupSyncSettings) =>
     updateBackupSyncSettings(input)

@@ -21,6 +21,7 @@ type AttachmentDownloadRow = SqliteRow & {
   filename: string
   mime_type: string | null
   size_bytes: number
+  raw_source: string | null
 }
 
 export async function downloadAttachment(attachmentId: number): Promise<AttachmentDownloadResult> {
@@ -55,7 +56,9 @@ function getDefaultAttachmentDownloadDir(): string {
   return app.getPath('downloads')
 }
 
-export async function loadAttachmentContent(attachmentId: number): Promise<ParsedMessageAttachment> {
+export async function loadAttachmentContent(
+  attachmentId: number
+): Promise<ParsedMessageAttachment> {
   const locator = getAttachmentDownloadLocator(attachmentId)
   if (!locator) throw new Error(`Attachment not found: ${attachmentId}`)
 
@@ -67,6 +70,12 @@ async function loadAttachmentContentByLocator(
 ): Promise<ParsedMessageAttachment> {
   const account = getAccount(locator.account_id)
   if (!account) throw new Error(`Account not found: ${locator.account_id}`)
+
+  if (locator.raw_source) {
+    const attachment = findMatchingAttachment(parseMimeAttachments(locator.raw_source), locator)
+    if (!attachment) throw new Error('未找到可下载的附件内容。')
+    return attachment
+  }
 
   const client = await SimpleImapSession.connect(account, 'D')
   try {
@@ -96,9 +105,11 @@ function getAttachmentDownloadLocator(attachmentId: number): AttachmentDownloadR
         a.filename,
         a.mime_type,
         a.size_bytes
+        , b.raw_source
       FROM onemail_message_attachments a
       JOIN onemail_mail_messages m ON m.message_id = a.message_id
       JOIN onemail_mail_folders f ON f.folder_id = m.folder_id
+      LEFT JOIN onemail_message_bodies b ON b.message_id = m.message_id
       WHERE a.attachment_id = :attachmentId
       `
     )

@@ -35,6 +35,14 @@ CREATE TABLE IF NOT EXISTS onemail_provider_presets (
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
+CREATE TABLE IF NOT EXISTS onemail_mail_signatures (
+  signature_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL UNIQUE CHECK (length(trim(title)) > 0),
+  content TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS onemail_mail_accounts (
   account_id INTEGER PRIMARY KEY AUTOINCREMENT,
   provider_key TEXT NOT NULL,
@@ -47,6 +55,7 @@ CREATE TABLE IF NOT EXISTS onemail_mail_accounts (
   auth_type TEXT NOT NULL CHECK (
     auth_type IN ('oauth2', 'app_password', 'password', 'bridge', 'manual')
   ),
+  receive_protocol TEXT NOT NULL DEFAULT 'imap' CHECK (receive_protocol IN ('imap', 'pop3')),
   imap_host TEXT NOT NULL,
   imap_port INTEGER NOT NULL CHECK (imap_port > 0 AND imap_port <= 65535),
   imap_security TEXT NOT NULL CHECK (imap_security IN ('ssl_tls', 'starttls', 'none')),
@@ -57,6 +66,15 @@ CREATE TABLE IF NOT EXISTS onemail_mail_accounts (
     smtp_auth_type IN ('oauth2', 'app_password', 'password', 'bridge', 'manual')
   ),
   smtp_enabled INTEGER NOT NULL DEFAULT 1 CHECK (smtp_enabled IN (0, 1)),
+  pop_host TEXT,
+  pop_port INTEGER CHECK (pop_port IS NULL OR (pop_port > 0 AND pop_port <= 65535)),
+  pop_security TEXT CHECK (pop_security IN ('ssl_tls', 'starttls', 'none')),
+  idle_supported INTEGER CHECK (idle_supported IS NULL OR idle_supported IN (0, 1)),
+  proxy_mode TEXT NOT NULL DEFAULT 'global' CHECK (proxy_mode IN ('global', 'none', 'system', 'custom')),
+  custom_proxy_url TEXT,
+  signature_mode TEXT NOT NULL DEFAULT 'global' CHECK (signature_mode IN ('global', 'none', 'custom')),
+  signature_id INTEGER,
+  account_sync_mode TEXT NOT NULL DEFAULT 'global' CHECK (account_sync_mode IN ('global', 'fallback', 'idle', 'interval', 'manual')),
   sync_enabled INTEGER NOT NULL DEFAULT 1 CHECK (sync_enabled IN (0, 1)),
   remote_delete_policy TEXT NOT NULL DEFAULT 'inherit' CHECK (
     remote_delete_policy IN ('inherit', 'enabled', 'disabled')
@@ -76,6 +94,7 @@ CREATE TABLE IF NOT EXISTS onemail_mail_accounts (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   FOREIGN KEY (provider_key) REFERENCES onemail_provider_presets(provider_key),
+  FOREIGN KEY (signature_id) REFERENCES onemail_mail_signatures(signature_id) ON DELETE SET NULL,
   UNIQUE(provider_key, normalized_email)
 );
 
@@ -133,6 +152,16 @@ CREATE TABLE IF NOT EXISTS onemail_folder_sync_states (
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
   FOREIGN KEY (folder_id) REFERENCES onemail_mail_folders(folder_id) ON DELETE CASCADE,
   FOREIGN KEY (account_id) REFERENCES onemail_mail_accounts(account_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS onemail_pop3_messages (
+  account_id INTEGER NOT NULL,
+  uidl TEXT NOT NULL,
+  message_id INTEGER,
+  seen_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  PRIMARY KEY (account_id, uidl),
+  FOREIGN KEY (account_id) REFERENCES onemail_mail_accounts(account_id) ON DELETE CASCADE,
+  FOREIGN KEY (message_id) REFERENCES onemail_mail_messages(message_id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS onemail_mail_messages (
@@ -197,6 +226,7 @@ CREATE TABLE IF NOT EXISTS onemail_message_bodies (
   message_id INTEGER PRIMARY KEY,
   body_text TEXT,
   body_html_sanitized TEXT,
+  raw_source TEXT,
   external_images_blocked INTEGER NOT NULL DEFAULT 1 CHECK (external_images_blocked IN (0, 1)),
   sanitized_at TEXT,
   loaded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),

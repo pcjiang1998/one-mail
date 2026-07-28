@@ -11,11 +11,13 @@ import {
   KeyRound,
   Languages,
   LoaderCircle,
+  Network,
   Settings2,
   Power,
   RefreshCcw,
   Save,
   ShieldCheck,
+  Signature,
   Upload
 } from 'lucide-react'
 import * as React from 'react'
@@ -37,6 +39,12 @@ import {
 } from '@renderer/components/backup/backup-import-dialog'
 import { getBackupSyncSettingsKey } from '@renderer/components/backup/backup-sync-draft'
 import { BackupSyncFields } from '@renderer/components/backup/backup-sync-fields'
+import {
+  CacheCleanupControl,
+  NetworkSettings,
+  SignatureSettings,
+  SyncSettings
+} from '@renderer/components/settings/settings-advanced-sections'
 import { ResponsiveDialog } from '@renderer/components/responsive-dialog'
 import { Button } from '@renderer/components/ui/button'
 import {
@@ -61,18 +69,19 @@ import { Alert, AlertDescription, AlertTitle } from '@renderer/components/ui/ale
 import type {
   AppSettings,
   AppUpdateStatus,
+  AccountUpdateInput,
   BackupImportResult,
   BackupImportSource,
   BackupSyncDownloadResult,
   BackupSyncSettings,
   SettingsUpdateInput,
-  SystemInfo
+  SystemInfo,
+  RemoteDeletePolicy
 } from '../../../../shared/types'
 import { cn } from '@renderer/lib/utils'
 import { useI18n, type TranslationKey } from '@renderer/lib/i18n'
 import { ONEMAIL_HOMEPAGE_URL, hasAvailableUpdate } from '@renderer/lib/update-status'
 import type { Account } from '@renderer/components/mail/types'
-import type { RemoteDeletePolicy } from '../../../../shared/types'
 
 type SettingsDialogProps = {
   open: boolean
@@ -84,10 +93,18 @@ type SettingsDialogProps = {
   onSubmit: (input: SettingsUpdateInput) => Promise<void>
   onImported?: () => Promise<void> | void
   accounts: Account[]
-  onUpdateAccountPolicy: (accountId: number, policy: RemoteDeletePolicy) => Promise<void>
+  onUpdateAccount: (input: AccountUpdateInput) => Promise<void>
+  onRefreshAccounts: () => Promise<void>
 }
 
-type SettingsSection = 'general' | 'mailOperations' | 'backup' | 'about'
+type SettingsSection =
+  | 'general'
+  | 'mailOperations'
+  | 'signatures'
+  | 'network'
+  | 'sync'
+  | 'backup'
+  | 'about'
 type BackupPending =
   | 'export'
   | 'import'
@@ -128,6 +145,21 @@ const sections: Array<{
     icon: RefreshCcw
   },
   {
+    value: 'signatures',
+    labelKey: 'settings.signatures',
+    icon: Signature
+  },
+  {
+    value: 'network',
+    labelKey: 'settings.network',
+    icon: Network
+  },
+  {
+    value: 'sync',
+    labelKey: 'settings.sync',
+    icon: Clock3
+  },
+  {
     value: 'backup',
     labelKey: 'settings.backup',
     icon: DatabaseBackup
@@ -149,7 +181,8 @@ export function SettingsDialog({
   onSubmit,
   onImported,
   accounts,
-  onUpdateAccountPolicy
+  onUpdateAccount,
+  onRefreshAccounts
 }: SettingsDialogProps): React.JSX.Element {
   const { t } = useI18n()
   const settingsSchema = React.useMemo(() => createSettingsSchema(t), [t])
@@ -421,13 +454,13 @@ export function SettingsDialog({
         open={open}
         onOpenChange={handleOpenChange}
         title={t('settings.title')}
-        contentClassName="h-[min(560px,82vh)] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:max-w-2xl"
+        contentClassName="h-[min(680px,90vh)] grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:max-w-4xl"
         headerClassName="shrink-0 border-b px-4 py-3 pr-12 [&_[data-slot=dialog-title]]:text-sm! [&_[data-slot=drawer-title]]:text-sm!"
         bodyClassName="h-full min-h-0 overflow-hidden"
       >
-        <div className="grid h-full min-h-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden md:grid-cols-[136px_minmax(0,1fr)] md:grid-rows-1">
+        <div className="grid h-full min-h-0 grid-cols-1 grid-rows-[auto_minmax(0,1fr)] overflow-hidden md:grid-cols-[156px_minmax(0,1fr)] md:grid-rows-1">
           <nav className="min-h-0 shrink-0 border-b bg-muted/30 p-1.5 md:border-r md:border-b-0 md:p-2">
-            <div className="flex gap-1 md:flex-col">
+            <div className="flex gap-1 overflow-x-auto md:flex-col md:overflow-visible">
               {sections.map((item) => {
                 const Icon = item.icon
                 const active = section === item.value
@@ -437,7 +470,7 @@ export function SettingsDialog({
                     key={item.value}
                     type="button"
                     className={cn(
-                      'flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md px-2 text-left text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring md:w-full md:flex-none [&_svg]:size-3.5',
+                      'flex h-8 min-w-24 flex-none items-center gap-1.5 rounded-md px-2 text-left text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring md:w-full [&_svg]:size-3.5',
                       active
                         ? 'bg-background text-foreground shadow-xs'
                         : 'text-muted-foreground hover:bg-background/70 hover:text-foreground'
@@ -459,7 +492,29 @@ export function SettingsDialog({
               <MailOperationsSettings
                 form={form}
                 accounts={accounts}
-                onUpdateAccountPolicy={onUpdateAccountPolicy}
+                onUpdateAccount={onUpdateAccount}
+              />
+            ) : section === 'signatures' ? (
+              <SignatureSettings
+                settings={settings}
+                accounts={accounts}
+                onSubmit={onSubmit}
+                onUpdateAccount={onUpdateAccount}
+                onRefreshAccounts={onRefreshAccounts}
+              />
+            ) : section === 'network' ? (
+              <NetworkSettings
+                settings={settings}
+                accounts={accounts}
+                onSubmit={onSubmit}
+                onUpdateAccount={onUpdateAccount}
+              />
+            ) : section === 'sync' ? (
+              <SyncSettings
+                settings={settings}
+                accounts={accounts}
+                onSubmit={onSubmit}
+                onUpdateAccount={onUpdateAccount}
               />
             ) : section === 'backup' ? (
               <BackupSettings
@@ -500,11 +555,11 @@ export function SettingsDialog({
 function MailOperationsSettings({
   form,
   accounts,
-  onUpdateAccountPolicy
+  onUpdateAccount
 }: {
   form: ReturnType<typeof useForm<SettingsFormValues>>
   accounts: Account[]
-  onUpdateAccountPolicy: (accountId: number, policy: RemoteDeletePolicy) => Promise<void>
+  onUpdateAccount: (input: AccountUpdateInput) => Promise<void>
 }): React.JSX.Element {
   const { t } = useI18n()
   const [pendingAccountId, setPendingAccountId] = React.useState<number | null>(null)
@@ -514,7 +569,7 @@ function MailOperationsSettings({
     setPendingAccountId(accountId)
     setPolicyError(null)
     try {
-      await onUpdateAccountPolicy(accountId, policy)
+      await onUpdateAccount({ accountId, remoteDeletePolicy: policy })
     } catch (updateError) {
       setPolicyError(updateError instanceof Error ? updateError.message : t('settings.updateError'))
     } finally {
@@ -618,25 +673,6 @@ function GeneralSettingsForm({
         />
 
         <SettingRow
-          icon={Clock3}
-          title={t('settings.syncInterval.title')}
-          description={t('settings.syncInterval.description')}
-          control={
-            <Input
-              id="sync-interval-minutes"
-              className="w-28"
-              type="number"
-              min={0}
-              max={1440}
-              aria-invalid={Boolean(form.formState.errors.syncIntervalMinutes)}
-              {...form.register('syncIntervalMinutes', { valueAsNumber: true })}
-            />
-          }
-          error={form.formState.errors.syncIntervalMinutes?.message}
-          invalid={Boolean(form.formState.errors.syncIntervalMinutes)}
-        />
-
-        <SettingRow
           icon={CalendarRange}
           title={t('settings.syncWindow.title')}
           description={t('settings.syncWindow.description')}
@@ -645,7 +681,7 @@ function GeneralSettingsForm({
               id="sync-window-days"
               className="w-28"
               type="number"
-              min={1}
+              min={0}
               max={3650}
               aria-invalid={Boolean(form.formState.errors.syncWindowDays)}
               {...form.register('syncWindowDays', { valueAsNumber: true })}
@@ -654,6 +690,8 @@ function GeneralSettingsForm({
           error={form.formState.errors.syncWindowDays?.message}
           invalid={Boolean(form.formState.errors.syncWindowDays)}
         />
+
+        <CacheCleanupControl />
 
         <Controller
           control={form.control}
@@ -1068,7 +1106,7 @@ function createSettingsSchema(t: (key: TranslationKey) => string) {
     syncWindowDays: z.coerce
       .number<number>(t('settings.syncWindow.errorRequired'))
       .int(t('settings.syncWindow.errorInteger'))
-      .min(1, t('settings.syncWindow.errorMin'))
+      .min(0, t('settings.syncWindow.errorMin'))
       .max(3650, t('settings.syncWindow.errorMax')),
     openAtLogin: z.boolean(),
     externalImagesBlocked: z.boolean(),

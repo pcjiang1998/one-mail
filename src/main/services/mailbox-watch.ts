@@ -1,6 +1,10 @@
 import { networkInterfaces } from 'node:os'
 import { BrowserWindow, net, powerMonitor } from 'electron'
-import { listAccounts, markAccountAuthError } from '../db/repositories/account.repository'
+import {
+  listAccounts,
+  markAccountAuthError,
+  updateAccountIdleSupport
+} from '../db/repositories/account.repository'
 import { getSettings } from '../db/repositories/settings.repository'
 import { syncAccountNow, type AccountSyncResult } from '../db/repositories/sync.repository'
 import { authenticateImapSession } from '../mail/imap-auth'
@@ -13,6 +17,7 @@ import {
 } from '../mail/imap-idle-session'
 import { scheduleImapTask } from './imap-scheduler'
 import { notifyNewMail } from './notification-center'
+import { resolveAccountSyncPolicy } from './sync-policy'
 
 type WatchTask = {
   accountId: number
@@ -62,7 +67,6 @@ const NETWORK_CHANGE_SETTLE_MS = 1500
 const STARTUP_FOREGROUND_SYNC_LIMIT = 3
 const ACTIVE_FOREGROUND_SYNC_LIMIT = 5
 const ACTIVE_WATCHER_LIMIT = 5
-const FOREGROUND_SYNC_STALE_MS = 10 * 60 * 1000
 const PRIORITY_MANUAL_SYNC = 80
 const PRIORITY_FOREGROUND_SYNC = 60
 const PRIORITY_NEW_MAIL_SYNC = 50
@@ -201,6 +205,7 @@ async function runMailboxWatcher(task: WatchTask): Promise<void> {
 
       await authenticateImapSession(account, session)
       const capabilities = await session.capabilities().catch(() => new Set<string>())
+      updateAccountIdleSupport(account.accountId, capabilities.has('IDLE'))
       task.watchMailboxes = await listWatchMailboxes(session)
       task.lastStatuses = await readMailboxStatuses(session, task.watchMailboxes, task.lastStatuses)
       task.failureCount = 0
@@ -442,7 +447,10 @@ async function runLimitedAccountSync(
 }
 
 function getForegroundSyncAccounts(reason: ForegroundSyncReason): SyncableAccount[] {
-  const accounts = getSyncableAccounts().sort(compareForegroundSyncPriority)
+  const settings = getSettings()
+  const accounts = getSyncableAccounts()
+    .filter((account) => resolveAccountSyncPolicy(account, settings).mode !== 'manual')
+    .sort(compareForegroundSyncPriority)
 
   if (reason === 'network') return accounts.slice(0, ACTIVE_FOREGROUND_SYNC_LIMIT)
   if (reason === 'startup') return accounts.slice(0, STARTUP_FOREGROUND_SYNC_LIMIT)
@@ -451,7 +459,11 @@ function getForegroundSyncAccounts(reason: ForegroundSyncReason): SyncableAccoun
 }
 
 function getWatcherAccounts(): SyncableAccount[] {
-  return getSyncableAccounts().sort(compareWatcherPriority).slice(0, ACTIVE_WATCHER_LIMIT)
+  const settings = getSettings()
+  return getSyncableAccounts()
+    .filter((account) => resolveAccountSyncPolicy(account, settings).mode === 'idle')
+    .sort(compareWatcherPriority)
+    .slice(0, ACTIVE_WATCHER_LIMIT)
 }
 
 function getSyncableAccounts(): SyncableAccount[] {
@@ -474,7 +486,10 @@ function compareForegroundSyncPriority(left: SyncableAccount, right: SyncableAcc
 
 function isForegroundSyncDue(account: SyncableAccount): boolean {
   const lastSyncTime = getLastSyncTime(account)
-  return lastSyncTime === 0 || Date.now() - lastSyncTime >= FOREGROUND_SYNC_STALE_MS
+  const policy = resolveAccountSyncPolicy(account, getSettings())
+  if (policy.mode === 'manual' || policy.mode === 'idle') return false
+  const intervalMs = (policy.intervalMinutes ?? 10) * 60 * 1000
+  return lastSyncTime === 0 || Date.now() - lastSyncTime >= intervalMs
 }
 
 function getLastSyncTime(account: SyncableAccount): number {
@@ -489,9 +504,13 @@ function getWatchSignature(account: ReturnType<typeof listAccounts>[number]): st
     account.accountId,
     account.email,
     account.authType,
+    account.receiveProtocol,
     account.imapHost,
     account.imapPort,
     account.imapSecurity,
+    account.idleSupported,
+    account.syncMode,
+    account.accountSyncIntervalMinutes,
     account.syncEnabled,
     account.credentialState
   ].join('|')
@@ -592,10 +611,15 @@ function stopForegroundSyncTimer(): void {
 }
 
 function getForegroundSyncIntervalMs(): number {
-  const minutes = getSettings().syncIntervalMinutes
-  if (!Number.isFinite(minutes) || minutes <= 0) return 0
-
-  return minutes * 60 * 1000
+  const settings = getSettings()
+  const intervals = listAccounts()
+    .filter(isWatchableAccount)
+    .map((account) => resolveAccountSyncPolicy(account, settings))
+    .filter((policy) => policy.mode === 'interval')
+    .map((policy) => policy.intervalMinutes ?? 0)
+    .filter((minutes) => minutes > 0)
+  if (intervals.length === 0) return 0
+  return Math.max(30_000, Math.min(...intervals) * 60 * 1000)
 }
 
 function checkNetworkSignatureChanged(): void {

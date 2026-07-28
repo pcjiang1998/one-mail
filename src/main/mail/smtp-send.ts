@@ -30,6 +30,7 @@ import { appendMessageToSentFolder } from './sent-folder-append'
 import { SimpleImapSession } from './imap-session'
 import { loadAttachmentContent } from './attachment-downloader'
 import { authenticateImapSession } from './imap-auth'
+import { connectMailTunnel } from '../services/network-proxy'
 
 export type SmtpSecurity = 'ssl_tls' | 'starttls' | 'none'
 
@@ -219,14 +220,16 @@ async function deliverRawEmail(input: SmtpDeliveryInput): Promise<{ envelopeId?:
   let result: Awaited<ReturnType<SmtpTransport['sendMail']>>
 
   try {
-    result = await createSmtpTransport(nodemailer, smtpConfig, auth).sendMail(message)
+    result = await createSmtpTransport(nodemailer, smtpConfig, auth, account).sendMail(message)
   } catch (error) {
     if (!isOAuthSmtpAuthError(error) || getSmtpAuthType(account, smtpAccount) !== 'oauth2') {
       throw error
     }
 
     const refreshedAuth = await resolveSmtpAuth(account, smtpAccount, true)
-    result = await createSmtpTransport(nodemailer, smtpConfig, refreshedAuth).sendMail(message)
+    result = await createSmtpTransport(nodemailer, smtpConfig, refreshedAuth, account).sendMail(
+      message
+    )
   }
 
   return {
@@ -237,14 +240,24 @@ async function deliverRawEmail(input: SmtpDeliveryInput): Promise<{ envelopeId?:
 function createSmtpTransport(
   nodemailer: Required<Pick<NodemailerModule, 'createTransport'>>,
   smtpConfig: ReturnType<typeof resolveSmtpConfig>,
-  auth: Record<string, string | number | undefined>
+  auth: Record<string, string | number | undefined>,
+  account: NonNullable<ReturnType<typeof getAccount>>
 ): SmtpTransport {
   return nodemailer.createTransport({
     host: smtpConfig.host,
     port: smtpConfig.port,
     secure: smtpConfig.security === 'ssl_tls',
     requireTLS: smtpConfig.security === 'starttls',
-    auth
+    auth,
+    getSocket: (
+      options: { host: string; port: number },
+      callback: (error: Error | null, result?: { connection: import('node:net').Socket }) => void
+    ) => {
+      void connectMailTunnel(account, options.host, options.port).then(
+        (connection) => callback(null, { connection }),
+        (error) => callback(error instanceof Error ? error : new Error(String(error)))
+      )
+    }
   })
 }
 
@@ -326,6 +339,7 @@ async function markAnsweredBestEffort(messageId: number): Promise<string | undef
 
   const account = getAccount(source.accountId)
   if (!account) return `Account not found: ${source.accountId}`
+  if (account.receiveProtocol === 'pop3') return undefined
 
   let session: SimpleImapSession | undefined
   try {

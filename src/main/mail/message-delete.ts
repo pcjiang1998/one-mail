@@ -44,6 +44,17 @@ export async function permanentlyDeleteMessage(messageId: number): Promise<Messa
   const account = getAccount(target.accountId)
   if (!account) throw new Error(`Account not found: ${target.accountId}`)
 
+  if (account.receiveProtocol === 'pop3') {
+    markMessageRemoteDeleted(messageId)
+    return {
+      messageId,
+      accountId: target.accountId,
+      folderId: target.folderId,
+      action: 'permanent_delete',
+      localOnly: true
+    }
+  }
+
   const client = await SimpleImapSession.connect(account, 'P')
 
   try {
@@ -83,6 +94,7 @@ export async function deleteMessageToTrash(messageId: number): Promise<MessageDe
 
   const account = getAccount(target.accountId)
   if (!account) throw new Error(`Account not found: ${target.accountId}`)
+  if (account.receiveProtocol === 'pop3') return hideMessageLocally(messageId)
   const trash = findFolderByRole(target.accountId, 'trash')
   const client = await SimpleImapSession.connect(account, 'T')
 
@@ -191,6 +203,17 @@ export async function restoreMessage(messageId: number): Promise<MessageDeleteRe
   const account = getAccount(target.accountId)
   if (!account) throw new Error(`Account not found: ${target.accountId}`)
 
+  if (account.receiveProtocol === 'pop3') {
+    restoreMessageLocally(messageId)
+    return {
+      messageId,
+      accountId: target.accountId,
+      folderId: target.folderId,
+      action: 'restore',
+      localOnly: true
+    }
+  }
+
   const client = await SimpleImapSession.connect(account, 'R')
 
   try {
@@ -264,6 +287,7 @@ function isTrashTarget(target: MessageDeleteTarget): boolean {
 function shouldSyncDeleteToRemote(target: MessageDeleteTarget): boolean {
   const account = getAccount(target.accountId)
   if (!account) return getSettings().syncDeleteToRemote
+  if (account.receiveProtocol === 'pop3') return false
   if (account.remoteDeletePolicy === 'enabled') return true
   if (account.remoteDeletePolicy === 'disabled') return false
   return getSettings().syncDeleteToRemote

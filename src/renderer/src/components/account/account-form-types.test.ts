@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { createAccountSchema, getProviderPreset } from './account-form-types'
+import {
+  createAccountSchema,
+  defaultAccountFormValues,
+  getProviderPreset
+} from './account-form-types'
 
 const translateKey = (key: string): string => key
 
@@ -21,6 +25,7 @@ describe('account provider presets', () => {
   it('requires an SMTP host only when custom SMTP sending is enabled', () => {
     const schema = createAccountSchema(translateKey)
     const customAccount = {
+      ...defaultAccountFormValues,
       kind: 'custom' as const,
       email: 'user@example.com',
       password: 'secret',

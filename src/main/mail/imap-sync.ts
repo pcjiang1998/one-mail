@@ -1,12 +1,13 @@
-import { Socket, connect as connectTcp } from 'node:net'
+import { Socket } from 'node:net'
 import { TLSSocket, connect as connectTls } from 'node:tls'
-import { getAccount } from '../db/repositories/account.repository'
+import { getAccount, updateAccountIdleSupport } from '../db/repositories/account.repository'
 import { getDatabase, type SqliteParams } from '../db/connection'
 import { normalizeMailDisplayText } from '../../shared/mail-text'
 import { authenticateImapSession } from './imap-auth'
 import { toImapConnectionError } from './imap-errors'
 import { parseImapMailboxList, type ImapMailbox } from './imap-mailboxes'
 import { getSelectedFolderPathKeys } from '../services/account-mailboxes'
+import { connectMailSocket } from '../services/network-proxy'
 
 type TestSocket = Socket | TLSSocket
 
@@ -80,6 +81,10 @@ export async function syncAccountMailbox(
 
   try {
     await authenticateImapSession(account, client)
+    if (account.idleSupported === undefined) {
+      const capabilities = await client.capabilities().catch(() => null)
+      if (capabilities) updateAccountIdleSupport(account.accountId, capabilities.has('IDLE'))
+    }
     const mailboxes = await listSyncMailboxes(account.accountId, client)
     const totals = { scannedCount: 0, insertedCount: 0, updatedCount: 0 }
 
@@ -135,18 +140,12 @@ class ImapSession {
   }
 
   static async connect(account: ImapAccount): Promise<ImapSession> {
-    const socket =
+    const socket = await connectMailSocket(
+      account,
+      account.imapHost,
+      account.imapPort,
       account.imapSecurity === 'ssl_tls'
-        ? connectTls({
-            host: account.imapHost,
-            port: account.imapPort,
-            servername: account.imapHost,
-            rejectUnauthorized: true
-          })
-        : connectTcp({
-            host: account.imapHost,
-            port: account.imapPort
-          })
+    )
 
     const session = new ImapSession(socket)
     await session.waitForGreeting()
@@ -169,6 +168,17 @@ class ImapSession {
 
   async identifyClient(): Promise<void> {
     await this.command(formatImapIdCommand()).catch(() => undefined)
+  }
+
+  async capabilities(): Promise<Set<string>> {
+    const response = await this.command('CAPABILITY')
+    const capabilities = new Set<string>()
+    for (const line of response.split(/\r?\n/)) {
+      const match = /^\*\s+CAPABILITY\s+(.+)$/i.exec(line.trim())
+      if (!match?.[1]) continue
+      for (const item of match[1].trim().split(/\s+/)) capabilities.add(item.toUpperCase())
+    }
+    return capabilities
   }
 
   async selectInbox(): Promise<void> {

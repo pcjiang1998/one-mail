@@ -52,8 +52,46 @@ const TABLE_COLUMN_UPGRADES: Record<string, ColumnDefinition[]> = {
       name: 'remote_delete_policy',
       definition:
         "remote_delete_policy TEXT NOT NULL DEFAULT 'inherit' CHECK (remote_delete_policy IN ('inherit', 'enabled', 'disabled'))"
+    },
+    {
+      name: 'receive_protocol',
+      definition:
+        "receive_protocol TEXT NOT NULL DEFAULT 'imap' CHECK (receive_protocol IN ('imap', 'pop3'))"
+    },
+    { name: 'pop_host', definition: 'pop_host TEXT' },
+    {
+      name: 'pop_port',
+      definition:
+        'pop_port INTEGER CHECK (pop_port IS NULL OR (pop_port > 0 AND pop_port <= 65535))'
+    },
+    {
+      name: 'pop_security',
+      definition: "pop_security TEXT CHECK (pop_security IN ('ssl_tls', 'starttls', 'none'))"
+    },
+    {
+      name: 'idle_supported',
+      definition:
+        'idle_supported INTEGER CHECK (idle_supported IS NULL OR idle_supported IN (0, 1))'
+    },
+    {
+      name: 'proxy_mode',
+      definition:
+        "proxy_mode TEXT NOT NULL DEFAULT 'global' CHECK (proxy_mode IN ('global', 'none', 'system', 'custom'))"
+    },
+    { name: 'custom_proxy_url', definition: 'custom_proxy_url TEXT' },
+    {
+      name: 'signature_mode',
+      definition:
+        "signature_mode TEXT NOT NULL DEFAULT 'global' CHECK (signature_mode IN ('global', 'none', 'custom'))"
+    },
+    { name: 'signature_id', definition: 'signature_id INTEGER' },
+    {
+      name: 'account_sync_mode',
+      definition:
+        "account_sync_mode TEXT NOT NULL DEFAULT 'global' CHECK (account_sync_mode IN ('global', 'fallback', 'idle', 'interval', 'manual'))"
     }
   ],
+  onemail_message_bodies: [{ name: 'raw_source', definition: 'raw_source TEXT' }],
   onemail_mail_messages: [
     {
       name: 'user_deleted',
@@ -70,6 +108,26 @@ const TABLE_COLUMN_UPGRADES: Record<string, ColumnDefinition[]> = {
 }
 
 export function upgradeSchema(db: SqliteDatabaseSync): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS onemail_mail_signatures (
+      signature_id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL UNIQUE CHECK (length(trim(title)) > 0),
+      content TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+  `)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS onemail_pop3_messages (
+      account_id INTEGER NOT NULL,
+      uidl TEXT NOT NULL,
+      message_id INTEGER,
+      seen_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+      PRIMARY KEY (account_id, uidl),
+      FOREIGN KEY (account_id) REFERENCES onemail_mail_accounts(account_id) ON DELETE CASCADE,
+      FOREIGN KEY (message_id) REFERENCES onemail_mail_messages(message_id) ON DELETE SET NULL
+    );
+  `)
   for (const [tableName, columns] of Object.entries(TABLE_COLUMN_UPGRADES)) {
     addMissingColumns(db, tableName, columns)
   }

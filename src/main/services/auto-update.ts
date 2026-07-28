@@ -7,7 +7,7 @@ import type { AppUpdateCheckResult, AppUpdateStatus } from '../../shared/types'
 
 const UPDATE_CHECK_INTERVAL_MS = 1000 * 60 * 60 * 6
 const GITHUB_LATEST_RELEASE_API_URL =
-  'https://api.github.com/repos/pcjiang1998/one-mail/releases/latest'
+  'https://api.github.com/repos/pcjiang1998/one-mail-next/releases/latest'
 const PACKAGED_APP_UPDATE_UNSUPPORTED_MESSAGE =
   '当前运行环境暂不支持自动检查更新，请使用已打包的正式版本。'
 const MAC_CODE_SIGN_UPDATE_UNSUPPORTED_MESSAGE =

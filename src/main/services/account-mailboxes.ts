@@ -12,6 +12,9 @@ type StoredFolderRow = SqliteRow & {
 }
 
 export async function discoverAccountMailFolders(accountId: number): Promise<AccountMailFolder[]> {
+  const account = getAccount(accountId)
+  if (!account) throw new Error(`Account not found: ${accountId}`)
+  if (account.receiveProtocol === 'pop3') return account.folders
   const mailboxes = await listRemoteMailboxes(accountId)
   return applyStoredSelection(accountId, mailboxes)
 }
@@ -20,6 +23,9 @@ export async function updateAccountFolderSelection(
   accountId: number,
   selectedFolderPaths: string[]
 ): Promise<AccountMailFolder[]> {
+  const account = getAccount(accountId)
+  if (!account) throw new Error(`Account not found: ${accountId}`)
+  if (account.receiveProtocol === 'pop3') return account.folders
   const mailboxes = await listRemoteMailboxes(accountId)
   const selectable = mailboxes.filter((mailbox) => mailbox.selectable)
   const pathsByKey = new Map(

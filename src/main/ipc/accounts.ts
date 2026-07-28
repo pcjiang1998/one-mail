@@ -5,9 +5,11 @@ import {
   getAccount,
   listAccounts,
   removeAccount,
-  updateAccount
+  updateAccount,
+  updateAccountIdleSupport
 } from '../db/repositories/account.repository'
-import { testImapConnection } from '../services/imap-connection-test'
+import { testImapConnection, testImapOAuthConnection } from '../services/imap-connection-test'
+import { testPop3Connection } from '../mail/pop3-session'
 import { refreshMailboxWatchers } from '../services/mailbox-watch'
 import type { AccountCreateInput, AccountCreatedEvent, AccountUpdateInput } from './types'
 import { saveAccountPassword, readAccountPassword } from '../services/credential-store'
@@ -31,6 +33,7 @@ export function registerAccountIpc(): void {
   ipcMain.handle('accounts/create', async (_event, input: AccountCreateInput) => {
     let nextInput = input
     let oauthToken: Awaited<ReturnType<typeof authorizeMicrosoftAccount>>['token'] | undefined
+    let idleSupported: boolean | undefined
 
     if (input.authType === 'oauth2') {
       const authorization = await authorizeMicrosoftAccount({ mode: input.oauthAuthorizationMode })
@@ -39,8 +42,12 @@ export function registerAccountIpc(): void {
         ...input,
         email: authorization.email
       }
+      idleSupported = await testImapOAuthConnection(nextInput, oauthToken.accessToken)
+    } else if (input.receiveProtocol === 'pop3') {
+      await testPop3Connection(input)
+      idleSupported = false
     } else {
-      await testImapConnection(input)
+      idleSupported = await testImapConnection(input)
     }
     let account: ReturnType<typeof createAccount> | null = null
 
@@ -52,6 +59,7 @@ export function registerAccountIpc(): void {
       } else {
         saveAccountPassword(account.accountId, nextInput)
       }
+      if (idleSupported !== undefined) updateAccountIdleSupport(account.accountId, idleSupported)
       const savedAccount = getAccount(account.accountId) ?? account
       refreshMailboxWatchers()
       broadcastAccountCreated(savedAccount)
@@ -72,8 +80,14 @@ export function registerAccountIpc(): void {
       throw new Error(`Account not found: ${input.accountId}`)
     }
 
-    if (isRemoteDeletePolicyOnlyUpdate(input)) {
-      return updateAccount(input)
+    if (input.receiveProtocol && input.receiveProtocol !== current.receiveProtocol) {
+      throw new Error('已添加账号不允许切换 IMAP/POP3 协议，请删除后重新添加。')
+    }
+
+    if (!requiresConnectionTest(input)) {
+      const account = updateAccount(input)
+      refreshMailboxWatchers()
+      return account
     }
 
     if (current.authType === 'oauth2' || input.authType === 'oauth2') {
@@ -99,11 +113,21 @@ export function registerAccountIpc(): void {
       smtpPort: input.smtpPort ?? current.smtpPort,
       smtpSecurity: input.smtpSecurity ?? current.smtpSecurity,
       smtpAuthType: input.smtpAuthType ?? current.smtpAuthType,
-      smtpEnabled: input.smtpEnabled ?? current.smtpEnabled
+      smtpEnabled: input.smtpEnabled ?? current.smtpEnabled,
+      receiveProtocol: current.receiveProtocol,
+      popHost: input.popHost ?? current.popHost,
+      popPort: input.popPort ?? current.popPort,
+      popSecurity: input.popSecurity ?? current.popSecurity,
+      proxyMode: input.proxyMode ?? current.proxyMode,
+      customProxyUrl: input.customProxyUrl ?? current.customProxyUrl
     }
-    await testImapConnection(connectionInput)
+    const idleSupported =
+      current.receiveProtocol === 'pop3'
+        ? await testPop3Connection(connectionInput).then(() => false)
+        : await testImapConnection(connectionInput)
 
     const account = updateAccount(input)
+    updateAccountIdleSupport(account.accountId, idleSupported)
     if (input.password) {
       saveAccountPassword(account.accountId, connectionInput)
     }
@@ -144,9 +168,20 @@ export function registerAccountIpc(): void {
   })
 }
 
-function isRemoteDeletePolicyOnlyUpdate(input: AccountUpdateInput): boolean {
-  const keys = Object.keys(input).filter((key) => key !== 'accountId')
-  return keys.length === 1 && keys[0] === 'remoteDeletePolicy'
+function requiresConnectionTest(input: AccountUpdateInput): boolean {
+  return [
+    'password',
+    'authType',
+    'providerKey',
+    'imapHost',
+    'imapPort',
+    'imapSecurity',
+    'popHost',
+    'popPort',
+    'popSecurity',
+    'proxyMode',
+    'customProxyUrl'
+  ].some((key) => Object.prototype.hasOwnProperty.call(input, key))
 }
 
 function normalizeOAuthAccountUpdate(
@@ -170,6 +205,12 @@ function normalizeOAuthAccountUpdate(
     displayName: input.displayName,
     syncEnabled: input.syncEnabled,
     remoteDeletePolicy: input.remoteDeletePolicy,
+    proxyMode: input.proxyMode,
+    customProxyUrl: input.customProxyUrl,
+    signatureMode: input.signatureMode,
+    signatureId: input.signatureId,
+    syncMode: input.syncMode,
+    accountSyncIntervalMinutes: input.accountSyncIntervalMinutes,
     selectedFolderPaths: input.selectedFolderPaths
   }
 }
