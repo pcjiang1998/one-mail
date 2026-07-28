@@ -52,6 +52,7 @@ import {
   removeAccount,
   revealDatabaseInFileManager,
   retryOutboxMessage,
+  parseMailboxSelection,
   saveSettings,
   syncAllAccounts,
   syncAccount,
@@ -124,6 +125,8 @@ export function MailboxWorkspace(): React.JSX.Element {
   const [dialogAccountId, setDialogAccountId] = React.useState<string | null>(null)
   const [warningAccountId, setWarningAccountId] = React.useState<string | null>(null)
   const [outboxOpen, setOutboxOpen] = React.useState(false)
+  const [outboxView, setOutboxView] = React.useState<'queue' | 'drafts'>('queue')
+  const [outboxAccountId, setOutboxAccountId] = React.useState<number | null>(null)
   const [outboxMessages, setOutboxMessages] = React.useState<OutboxMessage[]>([])
   const [outboxPending, setOutboxPending] = React.useState(false)
   const [outlookImapHelpAccount, setOutlookImapHelpAccount] = React.useState<Account | null>(null)
@@ -169,7 +172,8 @@ export function MailboxWorkspace(): React.JSX.Element {
     someVisibleSelected,
     clearSelection,
     selectAllVisible,
-    toggleMessageSelection
+    toggleMessageSelection,
+    selectMessageForContext
   } = useMessageSelection({ messages, resetKey: selectionScopeKey })
   const {
     deleteRequest,
@@ -197,6 +201,9 @@ export function MailboxWorkspace(): React.JSX.Element {
   const realAccounts = accounts.filter((account) => Boolean(account.accountId))
   const hasAccounts = realAccounts.length > 0
   const selectedAccount =
+    accounts.find(
+      (account) => account.accountId === parseMailboxSelection(selectedAccountId).accountId
+    ) ??
     accounts.find((account) => account.id === selectedAccountId) ??
     accounts[0] ??
     getFallbackAccount()
@@ -209,6 +216,7 @@ export function MailboxWorkspace(): React.JSX.Element {
     composerDraft,
     composerPending,
     openComposer,
+    openForwardMessages,
     openOutboxDraft,
     closeComposer,
     sendComposerDraft,
@@ -235,8 +243,9 @@ export function MailboxWorkspace(): React.JSX.Element {
   const refreshVisibleMailbox = React.useCallback(
     async (changedAccountId: number): Promise<void> => {
       const currentAccountId = selectedAccountId
+      const mailboxAccountId = parseMailboxSelection(currentAccountId).accountId
       const shouldRefreshMessages =
-        currentAccountId === 'all' || currentAccountId === String(changedAccountId)
+        currentAccountId === 'all' || mailboxAccountId === changedAccountId
 
       const refreshedAccounts = loadAccounts()
       const refreshedMessages = shouldRefreshMessages
@@ -718,6 +727,44 @@ export function MailboxWorkspace(): React.JSX.Element {
     }
   }
 
+  async function handleSendComposerDraft(
+    input: Parameters<typeof sendComposerDraft>[0]
+  ): Promise<void> {
+    await sendComposerDraft(input)
+    await refreshMessages(selectedAccountId, filters, searchKeyword)
+    void syncAccount(input.accountId)
+      .then(async () => {
+        await refreshAccounts()
+        await refreshMessages(selectedAccountId, filters, searchKeyword)
+      })
+      .catch(() => undefined)
+  }
+
+  async function handleUpdateAccountPolicy(
+    accountId: number,
+    remoteDeletePolicy: NonNullable<AccountUpdateInput['remoteDeletePolicy']>
+  ): Promise<void> {
+    await updateAccount({ accountId, remoteDeletePolicy })
+    await refreshAccounts()
+  }
+
+  async function handleMarkMessagesRead(targetMessages: Message[]): Promise<void> {
+    if (markingRead || targetMessages.length === 0) return
+
+    try {
+      const result = await markMessagesRead(targetMessages)
+      clearSelection()
+      if (filters.includes('unread')) {
+        await refreshMessages(selectedAccountId, filters, searchKeyword)
+      }
+      showMarkReadResult(result.updatedCount, result.failedCount)
+    } catch (markReadError) {
+      const messageText = getErrorMessage(markReadError, t('mailbox.readStateError'))
+      setError(messageText)
+      toast.error(messageText)
+    }
+  }
+
   async function handleMarkAllRead(): Promise<void> {
     if (markingRead || selectedAccount.unread === 0) return
 
@@ -831,7 +878,16 @@ export function MailboxWorkspace(): React.JSX.Element {
               onCompose={() => {
                 void openComposer('new')
               }}
-              onOpenOutbox={() => setOutboxOpen(true)}
+              onOpenOutbox={() => {
+                setOutboxView('queue')
+                setOutboxAccountId(null)
+                setOutboxOpen(true)
+              }}
+              onOpenDrafts={(account) => {
+                setOutboxView('drafts')
+                setOutboxAccountId(account.accountId ?? null)
+                setOutboxOpen(true)
+              }}
               onRefreshAccount={(account) => {
                 void handleRefreshAccount(account)
               }}
@@ -879,12 +935,23 @@ export function MailboxWorkspace(): React.JSX.Element {
               someVisibleSelected={someVisibleSelected}
               selectionDisabled={deleting || markingRead}
               onToggleMessageSelection={toggleMessageSelection}
+              onPrepareContextSelection={selectMessageForContext}
               onSelectAllVisible={selectAllVisible}
               onClearSelection={clearSelection}
               onMarkSelectedRead={() => {
                 void handleMarkSelectedRead()
               }}
               onDeleteSelected={() => requestDeleteMessages(selectedMessages)}
+              onMarkMessagesRead={(targetMessages) => {
+                void handleMarkMessagesRead(targetMessages)
+              }}
+              onReplyMessage={(message, replyAll) => {
+                void openComposer(replyAll ? 'reply_all' : 'reply', message)
+              }}
+              onForwardMessages={(targetMessages, asAttachments) => {
+                void openForwardMessages(targetMessages, asAttachments)
+              }}
+              onDeleteMessages={requestDeleteMessages}
             />
           </ResizablePanel>
 
@@ -997,6 +1064,8 @@ export function MailboxWorkspace(): React.JSX.Element {
         initialSection={settingsInitialSection}
         onOpenChange={(open) => setDialogKind(open ? 'settings' : null)}
         onSubmit={handleUpdateSettings}
+        accounts={realAccounts}
+        onUpdateAccountPolicy={handleUpdateAccountPolicy}
         onImported={reloadInitialData}
       />
       <BackupImportDialog
@@ -1021,14 +1090,18 @@ export function MailboxWorkspace(): React.JSX.Element {
         onOpenChange={(open) => {
           if (!open) closeComposer()
         }}
-        onSend={sendComposerDraft}
+        onSend={handleSendComposerDraft}
         onSaveDraft={handleSaveComposerDraft}
         onDiscardDraft={handleDiscardComposerDraft}
       />
       <OutboxPanel
         open={outboxOpen}
+        view={outboxView}
         pending={outboxPending}
-        outboxMessages={outboxMessages}
+        outboxMessages={outboxMessages.filter((message) => {
+          if (outboxView !== 'drafts') return message.status !== 'draft'
+          return message.status === 'draft' && message.accountId === outboxAccountId
+        })}
         onOpenChange={setOutboxOpen}
         onRefresh={() => {
           void refreshOutbox().catch((refreshError) => {
@@ -1042,9 +1115,7 @@ export function MailboxWorkspace(): React.JSX.Element {
         onRetry={(message) => {
           void handleRetryOutbox(message)
         }}
-        onDelete={(message) => {
-          void handleDeleteOutbox(message)
-        }}
+        onDelete={handleDeleteOutbox}
       />
       <DeleteMessageDialog
         open={Boolean(deleteRequest)}

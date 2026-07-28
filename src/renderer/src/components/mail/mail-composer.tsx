@@ -1,6 +1,7 @@
 import * as React from 'react'
 import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
+import Image from '@tiptap/extension-image'
 import { EditorContent, Extension, useEditor, type Attribute, type Editor } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import {
@@ -10,6 +11,7 @@ import {
   Bold,
   Check,
   Italic,
+  ImagePlus,
   LinkIcon,
   List,
   ListOrdered,
@@ -30,6 +32,7 @@ import {
 import { AddressInput } from '@renderer/components/mail/address-input'
 import type { Account } from '@renderer/components/mail/types'
 import { Button } from '@renderer/components/ui/button'
+import { DeleteDraftDialog } from '@renderer/components/mail/delete-draft-dialog'
 import { Checkbox } from '@renderer/components/ui/checkbox'
 import { Field, FieldError, FieldGroup, FieldLabel } from '@renderer/components/ui/field'
 import { Input } from '@renderer/components/ui/input'
@@ -49,7 +52,12 @@ import {
   TooltipTrigger
 } from '@renderer/components/ui/tooltip'
 import { cn } from '@renderer/lib/utils'
-import { selectMailAttachments, type ComposeDraft, type SendMessageInput } from '@renderer/lib/api'
+import {
+  selectInlineMailImage,
+  selectMailAttachments,
+  type ComposeDraft,
+  type SendMessageInput
+} from '@renderer/lib/api'
 import { useI18n } from '@renderer/lib/i18n'
 import type { MailAttachmentInput } from '../../../../shared/types'
 
@@ -113,6 +121,8 @@ export function MailComposer({
   const sendAccounts = accounts.filter((account) => account.accountId)
   const draftKey = getDraftKey(draft)
   const [expanded, setExpanded] = React.useState(false)
+  const [discardConfirmationOpen, setDiscardConfirmationOpen] = React.useState(false)
+  const [discardingDraft, setDiscardingDraft] = React.useState(false)
   const [ccVisible, setCcVisible] = React.useState(Boolean(draft?.cc?.length))
   const [bccVisible, setBccVisible] = React.useState(Boolean(draft?.bcc?.length))
   const [formState, setFormState] = React.useState<ComposerFormState>(() =>
@@ -227,14 +237,25 @@ export function MailComposer({
     setExpanded(false)
   }
 
-  async function handleDiscard(): Promise<void> {
+  function handleDiscard(): void {
     if (!draft?.draftId || !onDiscardDraft) {
       handleClose()
       return
     }
 
-    await onDiscardDraft(draft.draftId)
-    setExpanded(false)
+    setDiscardConfirmationOpen(true)
+  }
+
+  async function handleConfirmedDiscard(): Promise<void> {
+    if (!draft?.draftId || !onDiscardDraft) return
+    setDiscardingDraft(true)
+    try {
+      await onDiscardDraft(draft.draftId)
+      setDiscardConfirmationOpen(false)
+      setExpanded(false)
+    } finally {
+      setDiscardingDraft(false)
+    }
   }
 
   React.useEffect(() => {
@@ -304,7 +325,9 @@ export function MailComposer({
         <div className="min-h-0 flex-1 overflow-auto">
           <FieldGroup className="gap-0">
             <Field className={COMPOSER_ADDRESS_FIELD_CLASS} orientation="horizontal">
-              <ComposerFieldLabel htmlFor="composer-account">{t('mail.composer.from')}</ComposerFieldLabel>
+              <ComposerFieldLabel htmlFor="composer-account">
+                {t('mail.composer.from')}
+              </ComposerFieldLabel>
               <NativeSelect
                 id="composer-account"
                 size="sm"
@@ -341,7 +364,9 @@ export function MailComposer({
             </Field>
             {ccVisible ? (
               <Field className={COMPOSER_ADDRESS_FIELD_CLASS} orientation="horizontal">
-                <ComposerFieldLabel htmlFor="composer-cc">{t('mail.composer.cc')}</ComposerFieldLabel>
+                <ComposerFieldLabel htmlFor="composer-cc">
+                  {t('mail.composer.cc')}
+                </ComposerFieldLabel>
                 <AddressInput
                   id="composer-cc"
                   value={form.cc}
@@ -353,7 +378,9 @@ export function MailComposer({
             ) : null}
             {bccVisible ? (
               <Field className={COMPOSER_ADDRESS_FIELD_CLASS} orientation="horizontal">
-                <ComposerFieldLabel htmlFor="composer-bcc">{t('mail.composer.bcc')}</ComposerFieldLabel>
+                <ComposerFieldLabel htmlFor="composer-bcc">
+                  {t('mail.composer.bcc')}
+                </ComposerFieldLabel>
                 <AddressInput
                   id="composer-bcc"
                   value={form.bcc}
@@ -397,7 +424,9 @@ export function MailComposer({
                     >
                       <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
                       <span className="min-w-0 flex-1 truncate">
-                        {attachment.filename ?? attachment.filePath ?? t('mail.composer.attachmentFallback')}
+                        {attachment.filename ??
+                          attachment.filePath ??
+                          t('mail.composer.attachmentFallback')}
                       </span>
                       <span className="shrink-0 text-muted-foreground">
                         {formatBytes(attachment.sizeBytes)}
@@ -503,7 +532,7 @@ export function MailComposer({
               label={hasDraftContent(form) ? t('mail.composer.discardDraft') : t('common.close')}
               disabled={pending}
               onClick={() => {
-                void handleDiscard()
+                handleDiscard()
               }}
             >
               <Trash2 />
@@ -511,6 +540,15 @@ export function MailComposer({
           </div>
         </footer>
       </section>
+      <DeleteDraftDialog
+        open={discardConfirmationOpen}
+        pending={discardingDraft}
+        subject={form.subject}
+        onOpenChange={setDiscardConfirmationOpen}
+        onConfirm={() => {
+          void handleConfirmedDiscard()
+        }}
+      />
     </TooltipProvider>
   )
 }
@@ -592,37 +630,47 @@ function MailBodyEditor({
 }): React.JSX.Element {
   const { t } = useI18n()
   const lastDraftKeyRef = React.useRef(draftKey)
-  const editor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        link: false
-      }),
-      Link.configure({
-        openOnClick: false,
-        autolink: true,
-        defaultProtocol: 'https'
-      }),
-      ComposerTextAlignExtension,
-      Placeholder.configure({
-        placeholder: t('mail.composer.bodyPlaceholder')
-      })
-    ],
-    content: bodyHtml || textToHtml(bodyText),
-    editable: !disabled,
-    immediatelyRender: false,
-    editorProps: {
-      attributes: {
-        id: 'composer-body',
-        class: 'composer-body min-h-full px-3 py-3 outline-none break-words focus-visible:outline-none'
+  const editor = useEditor(
+    {
+      extensions: [
+        StarterKit.configure({
+          link: false
+        }),
+        Link.configure({
+          openOnClick: false,
+          autolink: true,
+          defaultProtocol: 'https'
+        }),
+        Image.configure({
+          allowBase64: true,
+          HTMLAttributes: {
+            class: 'composer-inline-image'
+          }
+        }),
+        ComposerTextAlignExtension,
+        Placeholder.configure({
+          placeholder: t('mail.composer.bodyPlaceholder')
+        })
+      ],
+      content: bodyHtml || textToHtml(bodyText),
+      editable: !disabled,
+      immediatelyRender: false,
+      editorProps: {
+        attributes: {
+          id: 'composer-body',
+          class:
+            'composer-body min-h-full px-3 py-3 outline-none break-words focus-visible:outline-none'
+        }
+      },
+      onUpdate: ({ editor: currentEditor }) => {
+        onChange({
+          bodyHtml: currentEditor.getHTML(),
+          bodyText: currentEditor.getText({ blockSeparator: '\n\n' })
+        })
       }
     },
-    onUpdate: ({ editor: currentEditor }) => {
-      onChange({
-        bodyHtml: currentEditor.getHTML(),
-        bodyText: currentEditor.getText({ blockSeparator: '\n\n' })
-      })
-    }
-  }, [t])
+    [t]
+  )
 
   React.useEffect(() => {
     editor?.setEditable(!disabled)
@@ -778,6 +826,23 @@ function EditorToolbar({
       </FormatButton>
       <Separator orientation="vertical" className="mx-1 h-5" />
       <LinkFormatButton editor={editor} disabled={disabled} />
+      <FormatButton
+        label={t('mail.composer.insertImage')}
+        disabled={disabled || !editor}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => {
+          void selectInlineMailImage().then((image) => {
+            if (!image || !editor) return
+            editor
+              .chain()
+              .focus()
+              .setImage({ src: image.dataUrl, alt: image.filename, title: image.filename })
+              .run()
+          })
+        }}
+      >
+        <ImagePlus />
+      </FormatButton>
     </div>
   )
 }

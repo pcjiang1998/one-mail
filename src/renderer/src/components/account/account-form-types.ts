@@ -1,7 +1,12 @@
 import { z } from 'zod'
 
 import type { TranslationKey } from '@renderer/lib/i18n'
-import type { AuthType, ImapSecurity, SmtpSecurity } from '../../../../shared/types'
+import type {
+  AuthType,
+  ImapSecurity,
+  RemoteDeletePolicy,
+  SmtpSecurity
+} from '../../../../shared/types'
 
 export const accountKinds = [
   'gmail',
@@ -59,6 +64,7 @@ export type AccountFormValues = {
   smtpPort: number
   smtpSecurity: SmtpSecurity
   smtpEnabled: boolean
+  remoteDeletePolicy: RemoteDeletePolicy
 }
 
 export const providerPresets: ProviderPreset[] = [
@@ -406,7 +412,8 @@ export function createAccountSchema(
         .min(1, t('account.form.portMin'))
         .max(65535, t('account.form.portMax')),
       smtpSecurity: z.enum(['ssl_tls', 'starttls', 'none']),
-      smtpEnabled: z.boolean()
+      smtpEnabled: z.boolean(),
+      remoteDeletePolicy: z.enum(['inherit', 'enabled', 'disabled'])
     })
     .superRefine((value, context) => {
       if (value.kind !== 'outlook' && !z.email().safeParse(value.email).success) {
@@ -458,7 +465,8 @@ export const defaultAccountFormValues: AccountFormValues = {
   smtpHost: 'smtp.gmail.com',
   smtpPort: 465,
   smtpSecurity: 'ssl_tls',
-  smtpEnabled: true
+  smtpEnabled: true,
+  remoteDeletePolicy: 'inherit'
 }
 
 export function getProviderPreset(kind: AccountKind): ProviderPreset {

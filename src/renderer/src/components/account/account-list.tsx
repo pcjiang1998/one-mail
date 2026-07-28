@@ -1,12 +1,18 @@
 import * as React from 'react'
 import {
   AlertTriangle,
+  ArchiveX,
   ChevronRight,
   Edit3,
   MailWarning,
+  FilePenLine,
+  Folder,
+  Inbox,
   Pencil,
   Plus,
   RefreshCw,
+  Send,
+  ShieldAlert,
   Trash2
 } from 'lucide-react'
 
@@ -28,10 +34,12 @@ import {
 } from '@renderer/components/ui/tooltip'
 import { useI18n, type TranslationKey } from '@renderer/lib/i18n'
 import { cn } from '@renderer/lib/utils'
+import { getProviderLogoMetadata } from '../../../../shared/provider-metadata'
 import {
-  getProviderLogoMetadata,
-  normalizeProviderKey
-} from '../../../../shared/provider-metadata'
+  getFolderSelectionKey,
+  getLocalDeletedSelectionKey,
+  parseMailboxSelection
+} from '@renderer/lib/api'
 import oneMailIcon from '../../assets/onemail-icon.png'
 import { getAccountWarning } from './account-warning'
 
@@ -45,16 +53,11 @@ type AccountListProps = {
   onSelectAccount: (accountId: string) => void
   onCompose: () => void
   onOpenOutbox: () => void
+  onOpenDrafts: (account: Account) => void
   onRefreshAccount: (account: Account) => void
   onEditAccount: (account: Account) => void
   onDeleteAccount: (account: Account) => void
   onResolveAccountWarning: (account: Account) => void
-}
-
-type AccountGroup = {
-  key: string
-  label: string
-  accounts: Account[]
 }
 
 export function AccountList({
@@ -67,26 +70,25 @@ export function AccountList({
   onSelectAccount,
   onCompose,
   onOpenOutbox,
+  onOpenDrafts,
   onRefreshAccount,
   onEditAccount,
   onDeleteAccount,
   onResolveAccountWarning
 }: AccountListProps): React.JSX.Element {
   const { t } = useI18n()
-  const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => new Set())
+  const [collapsedAccounts, setCollapsedAccounts] = React.useState<Set<string>>(() => new Set())
   const allAccount = accounts.find((account) => account.id === 'all')
-  const groups = groupAccountsByProvider(
-    accounts.filter((account) => account.id !== 'all'),
-    t
-  )
+  const mailboxAccountId = parseMailboxSelection(selectedAccountId).accountId
+  const realAccounts = accounts.filter((account) => account.id !== 'all')
 
-  function toggleGroup(groupKey: string): void {
-    setCollapsedGroups((current) => {
+  function toggleAccount(accountId: string): void {
+    setCollapsedAccounts((current) => {
       const next = new Set(current)
-      if (next.has(groupKey)) {
-        next.delete(groupKey)
+      if (next.has(accountId)) {
+        next.delete(accountId)
       } else {
-        next.add(groupKey)
+        next.add(accountId)
       }
       return next
     })
@@ -139,39 +141,50 @@ export function AccountList({
                 onResolveWarning={() => onResolveAccountWarning(allAccount)}
               />
             ) : null}
-            {groups.length > 0 ? (
-              groups.map((group) => {
-                const collapsed = collapsedGroups.has(group.key)
-
+            {realAccounts.length > 0 ? (
+              realAccounts.map((account) => {
+                const collapsed = collapsedAccounts.has(account.id)
                 return (
-                  <section key={group.key}>
-                    <button
-                      type="button"
-                      className="flex h-6 w-full items-center gap-1 rounded-md px-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      onClick={() => toggleGroup(group.key)}
-                    >
-                      <ChevronRight
-                        className={cn('size-3.5 transition-transform', !collapsed && 'rotate-90')}
-                        aria-hidden="true"
-                      />
-                      <span className="min-w-0 flex-1 truncate">{group.label}</span>
-                    </button>
-                    {!collapsed ? (
-                      <div className="flex flex-col gap-0.5">
-                        {group.accounts.map((account) => (
-                          <AccountRow
-                            key={account.id}
-                            account={account}
-                            selected={selectedAccountId === account.id}
-                            syncing={syncingAccountIds.has(account.id)}
-                            onClick={() => onSelectAccount(account.id)}
-                            onRefresh={() => onRefreshAccount(account)}
-                            onEdit={() => onEditAccount(account)}
-                            onDelete={() => onDeleteAccount(account)}
-                            onResolveWarning={() => onResolveAccountWarning(account)}
-                          />
-                        ))}
+                  <section key={account.id}>
+                    <div className="flex items-center gap-0.5">
+                      <button
+                        type="button"
+                        className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                        aria-label={
+                          collapsed ? t('account.folders.expand') : t('account.folders.collapse')
+                        }
+                        onClick={() => toggleAccount(account.id)}
+                      >
+                        <ChevronRight
+                          className={cn('size-3.5 transition-transform', !collapsed && 'rotate-90')}
+                        />
+                      </button>
+                      <div className="min-w-0 flex-1">
+                        <AccountRow
+                          account={account}
+                          selected={
+                            mailboxAccountId === account.accountId &&
+                            selectedAccountId === account.id
+                          }
+                          syncing={syncingAccountIds.has(account.id)}
+                          onClick={() => {
+                            onSelectAccount(account.id)
+                            if (collapsed) toggleAccount(account.id)
+                          }}
+                          onRefresh={() => onRefreshAccount(account)}
+                          onEdit={() => onEditAccount(account)}
+                          onDelete={() => onDeleteAccount(account)}
+                          onResolveWarning={() => onResolveAccountWarning(account)}
+                        />
                       </div>
+                    </div>
+                    {!collapsed && account.accountId ? (
+                      <AccountFolderRows
+                        account={account}
+                        selectedAccountId={selectedAccountId}
+                        onSelectAccount={onSelectAccount}
+                        onOpenDrafts={onOpenDrafts}
+                      />
                     ) : null}
                   </section>
                 )
@@ -184,6 +197,103 @@ export function AccountList({
       </div>
     </aside>
   )
+}
+
+function AccountFolderRows({
+  account,
+  selectedAccountId,
+  onSelectAccount,
+  onOpenDrafts
+}: {
+  account: Account
+  selectedAccountId: string
+  onSelectAccount: (accountId: string) => void
+  onOpenDrafts: (account: Account) => void
+}): React.JSX.Element {
+  const { t } = useI18n()
+  const folders = (account.folders ?? []).filter((folder) => folder.role !== 'drafts')
+
+  return (
+    <div className="ml-7 flex flex-col gap-0.5 border-l pl-1.5">
+      {folders.map((folder) => {
+        if (!account.accountId || !folder.folderId) return null
+        const key = getFolderSelectionKey(account.accountId, folder.folderId)
+        return (
+          <FolderRow
+            key={key}
+            label={getFolderLabel(folder.role, folder.name, t)}
+            count={folder.unreadCount}
+            selected={selectedAccountId === key}
+            icon={getFolderIcon(folder.role)}
+            onClick={() => onSelectAccount(key)}
+          />
+        )
+      })}
+      <FolderRow
+        label={t('account.folders.localDrafts')}
+        selected={false}
+        icon={<FilePenLine />}
+        onClick={() => onOpenDrafts(account)}
+      />
+      {account.accountId ? (
+        <FolderRow
+          label={t('account.folders.localDeleted')}
+          selected={selectedAccountId === getLocalDeletedSelectionKey(account.accountId)}
+          icon={<ArchiveX />}
+          onClick={() => onSelectAccount(getLocalDeletedSelectionKey(account.accountId!))}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function FolderRow({
+  label,
+  count,
+  selected,
+  icon,
+  onClick
+}: {
+  label: string
+  count?: number
+  selected: boolean
+  icon: React.ReactNode
+  onClick: () => void
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      className={cn(
+        'flex h-7 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-xs outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring [&_svg]:size-3.5',
+        selected && 'bg-secondary text-secondary-foreground'
+      )}
+      onClick={onClick}
+    >
+      <span className="shrink-0 text-muted-foreground">{icon}</span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {count ? <span className="shrink-0 text-[10px] text-muted-foreground">{count}</span> : null}
+    </button>
+  )
+}
+
+function getFolderIcon(role: string): React.ReactNode {
+  if (role === 'inbox') return <Inbox />
+  if (role === 'sent') return <Send />
+  if (role === 'junk') return <ShieldAlert />
+  if (role === 'trash') return <Trash2 />
+  return <Folder />
+}
+
+function getFolderLabel(
+  role: string,
+  fallback: string,
+  t: (key: TranslationKey) => string
+): string {
+  if (role === 'inbox') return t('account.folders.inbox')
+  if (role === 'sent') return t('account.folders.sent')
+  if (role === 'junk') return t('account.folders.junk')
+  if (role === 'trash') return t('account.folders.remoteTrash')
+  return fallback
 }
 
 function AccountRow({
@@ -319,16 +429,18 @@ function ProviderLogo({
 }): React.JSX.Element {
   const isUnifiedInbox = account.id === 'all'
   const logo = getProviderLogoMetadata(account.providerKey, account.address)
-  const [src, setSrc] = React.useState<string | null>(null)
+  const [loadedLogo, setLoadedLogo] = React.useState<{ domain: string; src: string | null } | null>(
+    null
+  )
+  const src = loadedLogo?.domain === logo.domain ? loadedLogo.src : null
 
   React.useEffect(() => {
     if (isUnifiedInbox) return undefined
 
     let cancelled = false
-    setSrc(null)
 
     void window.api.logos.get(logo.domain).then((nextSrc) => {
-      if (!cancelled) setSrc(nextSrc)
+      if (!cancelled) setLoadedLogo({ domain: logo.domain, src: nextSrc })
     })
 
     return () => {
@@ -376,51 +488,4 @@ function EmptyAccounts(): React.JSX.Element {
       </Button>
     </div>
   )
-}
-
-function groupAccountsByProvider(
-  accounts: Account[],
-  t: (key: TranslationKey) => string
-): AccountGroup[] {
-  const groups = new Map<string, Account[]>()
-
-  for (const account of accounts) {
-    const key = normalizeProviderKey(account.providerKey)
-    groups.set(key, [...(groups.get(key) ?? []), account])
-  }
-
-  return Array.from(groups.entries())
-    .sort(([first], [second]) => first.localeCompare(second))
-    .map(([key, groupAccounts]) => ({
-      key,
-      label: getProviderLabel(key, t),
-      accounts: groupAccounts.sort((first, second) => first.address.localeCompare(second.address))
-    }))
-}
-
-function getProviderLabel(providerKey: string, t: (key: TranslationKey) => string): string {
-  const labels: Record<string, TranslationKey> = {
-    gmail: 'account.provider.gmail',
-    yahoo: 'account.provider.yahoo',
-    outlook: 'account.provider.outlook',
-    '163': 'account.provider.netease163',
-    qq: 'account.provider.qq',
-    aliyun: 'account.provider.aliyun',
-    aliyunEnterprise: 'account.provider.aliyunEnterprise',
-    '189': 'account.provider.mail189',
-    sohu: 'account.provider.sohu',
-    sina: 'account.provider.sina',
-    '139': 'account.provider.mail139',
-    '21cn': 'account.provider.mail21cn',
-    perfect: 'account.provider.perfect',
-    icloud: 'account.provider.icloud',
-    aol: 'account.provider.aol',
-    yandex: 'account.provider.yandex',
-    mailru: 'account.provider.mailru',
-    custom: 'account.provider.custom',
-    manual: 'account.provider.custom'
-  }
-
-  const labelKey = labels[providerKey]
-  return labelKey ? t(labelKey) : providerKey
 }

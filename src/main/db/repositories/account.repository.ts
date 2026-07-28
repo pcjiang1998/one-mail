@@ -6,7 +6,12 @@ import {
   toOptionalString,
   type SqliteRow
 } from '../connection'
-import type { AccountCreateInput, AccountUpdateInput, MailAccount } from '../../ipc/types'
+import type {
+  AccountCreateInput,
+  AccountMailFolder,
+  AccountUpdateInput,
+  MailAccount
+} from '../../ipc/types'
 
 type AccountRow = SqliteRow & {
   account_id: number
@@ -24,6 +29,7 @@ type AccountRow = SqliteRow & {
   smtp_auth_type: MailAccount['smtpAuthType'] | null
   smtp_enabled: number
   sync_enabled: number
+  remote_delete_policy: MailAccount['remoteDeletePolicy']
   credential_state: MailAccount['credentialState']
   status: MailAccount['status']
   last_sync_at: string | null
@@ -50,6 +56,7 @@ export function listAccounts(): MailAccount[] {
         smtp_auth_type,
         smtp_enabled,
         sync_enabled,
+        remote_delete_policy,
         CASE
           WHEN encrypted_password IS NOT NULL THEN 'stored'
           WHEN auth_type = 'oauth2' AND EXISTS (
@@ -89,6 +96,7 @@ export function getAccount(accountId: number): MailAccount | null {
         smtp_auth_type,
         smtp_enabled,
         sync_enabled,
+        remote_delete_policy,
         CASE
           WHEN encrypted_password IS NOT NULL THEN 'stored'
           WHEN auth_type = 'oauth2' AND EXISTS (
@@ -205,6 +213,7 @@ export function createAccount(input: AccountCreateInput): MailAccount {
         smtp_security,
         smtp_auth_type,
         smtp_enabled,
+        remote_delete_policy,
         credential_state,
         status
       )
@@ -224,6 +233,7 @@ export function createAccount(input: AccountCreateInput): MailAccount {
         :smtpSecurity,
         :smtpAuthType,
         :smtpEnabled,
+        :remoteDeletePolicy,
         'pending',
         'active'
       )
@@ -244,7 +254,8 @@ export function createAccount(input: AccountCreateInput): MailAccount {
       smtpPort: toNullableParam(smtpSettings.smtpPort),
       smtpSecurity: toNullableParam(smtpSettings.smtpSecurity),
       smtpAuthType: toNullableParam(smtpSettings.smtpAuthType),
-      smtpEnabled: smtpSettings.smtpEnabled ? 1 : 0
+      smtpEnabled: smtpSettings.smtpEnabled ? 1 : 0,
+      remoteDeletePolicy: input.remoteDeletePolicy ?? 'inherit'
     })
 
   const account = getAccount(Number(result.lastInsertRowid))
@@ -279,6 +290,7 @@ export function updateAccount(input: AccountUpdateInput): MailAccount {
         smtp_auth_type = :smtpAuthType,
         smtp_enabled = :smtpEnabled,
         sync_enabled = :syncEnabled,
+        remote_delete_policy = :remoteDeletePolicy,
         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
       WHERE account_id = :accountId
       `
@@ -300,7 +312,8 @@ export function updateAccount(input: AccountUpdateInput): MailAccount {
       smtpSecurity: toNullableParam(input.smtpSecurity ?? current.smtpSecurity),
       smtpAuthType: toNullableParam(input.smtpAuthType ?? current.smtpAuthType),
       smtpEnabled: (input.smtpEnabled ?? current.smtpEnabled) ? 1 : 0,
-      syncEnabled: (input.syncEnabled ?? current.syncEnabled) ? 1 : 0
+      syncEnabled: (input.syncEnabled ?? current.syncEnabled) ? 1 : 0,
+      remoteDeletePolicy: input.remoteDeletePolicy ?? current.remoteDeletePolicy
     })
 
   const updated = getAccount(input.accountId)
@@ -377,7 +390,59 @@ function mapAccountRow(row: AccountRow): MailAccount {
     credentialState: row.credential_state,
     status: row.status,
     lastSyncAt: toOptionalString(row.last_sync_at),
-    lastError: toOptionalString(row.last_error)
+    lastError: toOptionalString(row.last_error),
+    remoteDeletePolicy: row.remote_delete_policy,
+    folders: listStoredFolders(toNumber(row.account_id))
+  }
+}
+
+function listStoredFolders(accountId: number): AccountMailFolder[] {
+  return getDatabase()
+    .prepare<
+      SqliteRow & {
+        folder_id: number
+        path: string
+        name: string
+        delimiter: string | null
+        role: AccountMailFolder['role']
+        attributes_json: string
+        is_selectable: number
+        sync_enabled: number
+        total_count: number
+        unread_count: number
+      }
+    >(
+      `
+      SELECT folder_id, path, name, delimiter, role, attributes_json,
+             is_selectable, sync_enabled, total_count, unread_count
+      FROM onemail_mail_folders
+      WHERE account_id = :accountId AND sync_enabled = 1
+      ORDER BY sort_order ASC, folder_id ASC
+      `
+    )
+    .all({ accountId })
+    .map((row) => ({
+      folderId: toNumber(row.folder_id),
+      path: row.path,
+      name: row.name,
+      delimiter: toOptionalString(row.delimiter),
+      role: row.role,
+      attributes: parseStringArray(row.attributes_json),
+      selectable: toBoolean(row.is_selectable),
+      selected: toBoolean(row.sync_enabled),
+      totalCount: toNumber(row.total_count),
+      unreadCount: toNumber(row.unread_count)
+    }))
+}
+
+function parseStringArray(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string')
+      : []
+  } catch {
+    return []
   }
 }
 

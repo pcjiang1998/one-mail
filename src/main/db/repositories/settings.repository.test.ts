@@ -20,7 +20,12 @@ import {
   setDatabaseKey,
   setDatabasePath
 } from '../connection'
-import { getBackupSyncSettings, updateBackupSyncSettings } from './settings.repository'
+import {
+  getBackupSyncSettings,
+  getSettings,
+  updateBackupSyncSettings,
+  updateSettings
+} from './settings.repository'
 
 describe('settings repository backup sync', () => {
   let testDir = ''
@@ -64,5 +69,12 @@ describe('settings repository backup sync', () => {
       }>("SELECT value_type FROM onemail_app_settings WHERE setting_key = 'backup_sync_settings'")
       .get()
     expect(row?.value_type).toBe('json')
+  })
+
+  it('defaults remote deletion sync on and persists changes', () => {
+    expect(getSettings().syncDeleteToRemote).toBe(true)
+
+    expect(updateSettings({ syncDeleteToRemote: false }).syncDeleteToRemote).toBe(false)
+    expect(getSettings().syncDeleteToRemote).toBe(false)
   })
 })

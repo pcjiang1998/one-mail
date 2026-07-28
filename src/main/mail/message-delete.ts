@@ -1,7 +1,9 @@
 import { getAccount } from '../db/repositories/account.repository'
+import { getSettings } from '../db/repositories/settings.repository'
 import {
   getMessageDeleteTarget,
   markMessageDeleteError,
+  markMessageMovedToTrash,
   markMessageRemoteDeleted,
   restoreMessageLocally,
   markMessageUserHidden,
@@ -15,12 +17,13 @@ export type MessageDeleteResult = {
   messageId: number
   accountId: number
   folderId: number
-  action: 'permanent_delete' | 'local_hide' | 'restore'
+  action: 'trash' | 'permanent_delete' | 'local_hide' | 'restore'
   localOnly?: boolean
 }
 
 export type BulkDeleteOptions = {
   localOnly?: boolean
+  permanent?: boolean
 }
 
 export type BulkDeleteFailure = {
@@ -45,8 +48,11 @@ export async function permanentlyDeleteMessage(messageId: number): Promise<Messa
 
   try {
     await authenticateImapSession(account, client)
-    await client.selectMailbox(target.folderPath)
-    await client.setDeletedFlag(target.uid, true)
+    const location = await resolvePermanentDeleteLocation(client, target)
+    await client.selectMailbox(location.folderPath)
+    for (const uid of location.uids) {
+      await client.setDeletedFlag(uid, true)
+    }
     await client.expunge()
     markMessageRemoteDeleted(messageId)
 
@@ -64,6 +70,84 @@ export async function permanentlyDeleteMessage(messageId: number): Promise<Messa
   }
 }
 
+export async function deleteMessageToTrash(messageId: number): Promise<MessageDeleteResult> {
+  const target = requireDeleteTarget(messageId)
+
+  if (requiresPermanentRemoteDelete(target)) {
+    return permanentlyDeleteMessage(messageId)
+  }
+
+  if (!shouldSyncDeleteToRemote(target)) {
+    return hideMessageLocally(messageId)
+  }
+
+  const account = getAccount(target.accountId)
+  if (!account) throw new Error(`Account not found: ${target.accountId}`)
+  const trash = findFolderByRole(target.accountId, 'trash')
+  const client = await SimpleImapSession.connect(account, 'T')
+
+  try {
+    await authenticateImapSession(account, client)
+    const capabilities = await client.capability().catch(() => new Set<string>())
+    await client.selectMailbox(target.folderPath)
+
+    if (trash && trash.folderId !== target.folderId) {
+      let destinationUid: number | undefined
+      if (capabilities.has('MOVE')) {
+        destinationUid = await client.uidMove(target.uid, trash.path)
+      } else {
+        destinationUid = await client.uidCopy(target.uid, trash.path)
+        await client.setDeletedFlag(target.uid, true)
+        await client.expunge()
+      }
+      markMessageMovedToTrash(messageId, trash.folderId, destinationUid)
+    } else {
+      await client.setDeletedFlag(target.uid, true)
+      await client.expunge()
+      markMessageRemoteDeleted(messageId)
+      return {
+        messageId,
+        accountId: target.accountId,
+        folderId: target.folderId,
+        action: 'permanent_delete',
+        localOnly: false
+      }
+    }
+
+    return {
+      messageId,
+      accountId: target.accountId,
+      folderId: target.folderId,
+      action: 'trash',
+      localOnly: false
+    }
+  } catch (error) {
+    markMessageDeleteError(messageId, getErrorMessage(error))
+    throw error
+  } finally {
+    await client.logout().catch(() => undefined)
+  }
+}
+
+async function resolvePermanentDeleteLocation(
+  client: SimpleImapSession,
+  target: MessageDeleteTarget
+): Promise<{ folderPath: string; uids: number[] }> {
+  if (!target.userDeleted || isTrashTarget(target)) {
+    return { folderPath: target.folderPath, uids: [target.uid] }
+  }
+
+  const trash = findFolderByRole(target.accountId, 'trash')
+  if (!trash || !target.rfc822MessageId) {
+    throw new Error('无法定位远端已删除邮件，请先同步该邮箱后重试。')
+  }
+
+  await client.selectMailbox(trash.path)
+  const uids = await client.searchByMessageId(target.rfc822MessageId)
+  if (uids.length === 0) throw new Error('远端已删除邮件不存在，请同步该邮箱后重试。')
+  return { folderPath: trash.path, uids }
+}
+
 export function hideMessageLocally(messageId: number): MessageDeleteResult {
   const target = requireDeleteTarget(messageId)
   markMessageUserHidden(messageId)
@@ -79,7 +163,7 @@ export function hideMessageLocally(messageId: number): MessageDeleteResult {
 export async function restoreMessage(messageId: number): Promise<MessageDeleteResult> {
   const target = requireRestoreTarget(messageId)
 
-  if (target.userHidden) {
+  if (target.userHidden && !target.userDeleted) {
     restoreMessageLocally(messageId)
     return {
       messageId,
@@ -145,70 +229,14 @@ export async function bulkDelete(
   const succeededMessageIds: number[] = []
   const failedItems: BulkDeleteFailure[] = []
 
-  if (options.localOnly) {
-    for (const messageId of uniqueMessageIds(messageIds)) {
-      try {
-        hideMessageLocally(messageId)
-        succeededMessageIds.push(messageId)
-      } catch (error) {
-        failedItems.push({ messageId, error: getErrorMessage(error) })
-      }
-    }
-
-    return toBulkResult(succeededMessageIds, failedItems)
-  }
-
-  const targets = uniqueMessageIds(messageIds).map((messageId) => ({
-    messageId,
-    target: getMessageDeleteTarget(messageId)
-  }))
-  const groups = groupTargets(targets.filter(hasDeleteTarget).map(({ target }) => target))
-
-  for (const { messageId, target } of targets) {
-    if (!target) {
-      failedItems.push({ messageId, error: '邮件不存在。' })
-    }
-  }
-
-  for (const group of groups) {
-    const account = getAccount(group.accountId)
-    if (!account) {
-      for (const target of group.targets) {
-        failedItems.push({
-          messageId: target.messageId,
-          error: `Account not found: ${group.accountId}`
-        })
-      }
-      continue
-    }
-
-    const client = await SimpleImapSession.connect(account, 'X')
-
+  for (const messageId of uniqueMessageIds(messageIds)) {
     try {
-      await authenticateImapSession(account, client)
-      await client.selectMailbox(group.folderPath)
-
-      for (const target of group.targets) {
-        try {
-          await client.setDeletedFlag(target.uid, true)
-          await client.expunge()
-          markMessageRemoteDeleted(target.messageId)
-
-          succeededMessageIds.push(target.messageId)
-        } catch (error) {
-          const message = getErrorMessage(error)
-          markMessageDeleteError(target.messageId, message)
-          failedItems.push({ messageId: target.messageId, error: message })
-        }
-      }
+      if (options.localOnly) hideMessageLocally(messageId)
+      else if (options.permanent) await permanentlyDeleteMessage(messageId)
+      else await deleteMessageToTrash(messageId)
+      succeededMessageIds.push(messageId)
     } catch (error) {
-      const message = getErrorMessage(error)
-      for (const target of group.targets) {
-        markMessageDeleteError(target.messageId, message)
-        failedItems.push({ messageId: target.messageId, error: message })
-      }
-    } finally {
-      await client.logout().catch(() => undefined)
+      failedItems.push({ messageId, error: getErrorMessage(error) })
     }
   }
 
@@ -233,42 +261,18 @@ function isTrashTarget(target: MessageDeleteTarget): boolean {
   return target.folderRole === 'trash' || detectSpecialFolderRole(target.folderPath) === 'trash'
 }
 
-function groupTargets(targets: MessageDeleteTarget[]): Array<{
-  accountId: number
-  folderId: number
-  folderPath: string
-  targets: MessageDeleteTarget[]
-}> {
-  const groups = new Map<
-    string,
-    {
-      accountId: number
-      folderId: number
-      folderPath: string
-      targets: MessageDeleteTarget[]
-    }
-  >()
-
-  for (const target of targets) {
-    const key = `${target.accountId}:${target.folderId}`
-    const group = groups.get(key) ?? {
-      accountId: target.accountId,
-      folderId: target.folderId,
-      folderPath: target.folderPath,
-      targets: []
-    }
-    group.targets.push(target)
-    groups.set(key, group)
-  }
-
-  return Array.from(groups.values())
+function shouldSyncDeleteToRemote(target: MessageDeleteTarget): boolean {
+  const account = getAccount(target.accountId)
+  if (!account) return getSettings().syncDeleteToRemote
+  if (account.remoteDeletePolicy === 'enabled') return true
+  if (account.remoteDeletePolicy === 'disabled') return false
+  return getSettings().syncDeleteToRemote
 }
 
-function hasDeleteTarget(item: {
-  messageId: number
-  target: MessageDeleteTarget | null
-}): item is { messageId: number; target: MessageDeleteTarget } {
-  return item.target !== null
+function requiresPermanentRemoteDelete(target: MessageDeleteTarget): boolean {
+  if (target.userHidden) return true
+  const role = detectSpecialFolderRole(target.folderPath) ?? target.folderRole
+  return role === 'sent' || role === 'drafts' || role === 'junk' || role === 'trash'
 }
 
 function uniqueMessageIds(messageIds: number[]): number[] {

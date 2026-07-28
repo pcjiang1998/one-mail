@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import {
   bulkDelete,
+  deleteMessageToTrash,
   hideMessageLocally,
   permanentlyDeleteMessage,
   restoreMessage
@@ -19,9 +20,10 @@ export function registerMessageActionIpc(): void {
     return deleteOneMessage(input)
   })
   ipcMain.handle('messages/bulkDelete', async (_event, input: MessageBulkDeleteInput) => {
-    const mode = input.mode === 'local_hide' ? 'local_hide' : 'permanent'
+    const mode = normalizeDeleteMode(input.mode)
     const result = await bulkDelete(input.messageIds, {
-      localOnly: mode === 'local_hide'
+      localOnly: mode === 'local_hide',
+      permanent: mode === 'permanent'
     })
 
     return {
@@ -48,16 +50,36 @@ export function registerMessageActionIpc(): void {
 }
 
 async function deleteOneMessage(input: MessageDeleteInput): Promise<MessageDeleteResult> {
-  const mode = input.mode === 'local_hide' ? 'local_hide' : 'permanent'
+  const mode = normalizeDeleteMode(input.mode)
 
   if (mode === 'local_hide') {
     const result = hideMessageLocally(input.messageId)
     return toDeleteResult(result.messageId, result.accountId, mode, true, true)
   }
 
-  const result = await permanentlyDeleteMessage(input.messageId)
+  const result =
+    mode === 'permanent'
+      ? await permanentlyDeleteMessage(input.messageId)
+      : await deleteMessageToTrash(input.messageId)
 
-  return toDeleteResult(result.messageId, result.accountId, mode, true, false)
+  const actualMode =
+    result.action === 'local_hide'
+      ? 'local_hide'
+      : result.action === 'permanent_delete'
+        ? 'permanent'
+        : 'trash'
+  return toDeleteResult(
+    result.messageId,
+    result.accountId,
+    actualMode,
+    true,
+    Boolean(result.localOnly)
+  )
+}
+
+function normalizeDeleteMode(mode?: MessageDeleteMode): MessageDeleteMode {
+  if (mode === 'local_hide' || mode === 'permanent') return mode
+  return 'trash'
 }
 
 function toDeleteResult(

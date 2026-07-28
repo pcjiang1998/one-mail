@@ -11,6 +11,7 @@ export type SmtpSecurity = 'ssl_tls' | 'starttls' | 'none'
 export type CredentialState = 'pending' | 'stored' | 'invalid' | 'expired' | 'revoked'
 export type OAuthAuthorizationMode = 'internal_browser' | 'copy_link'
 export type SyncMode = 'initial' | 'refresh'
+export type RemoteDeletePolicy = 'inherit' | 'enabled' | 'disabled'
 
 export type MailAccount = {
   accountId: number
@@ -32,6 +33,8 @@ export type MailAccount = {
   status: AccountStatus
   lastSyncAt?: string
   lastError?: string
+  remoteDeletePolicy: RemoteDeletePolicy
+  folders: AccountMailFolder[]
 }
 
 export type AccountCreateInput = {
@@ -49,6 +52,7 @@ export type AccountCreateInput = {
   smtpSecurity?: SmtpSecurity
   smtpAuthType?: AuthType
   smtpEnabled?: boolean
+  remoteDeletePolicy?: RemoteDeletePolicy
 }
 
 export type AccountCreatedEvent = {
@@ -77,6 +81,7 @@ export type MailFolderRole =
   | 'custom'
 
 export type AccountMailFolder = {
+  folderId?: number
   path: string
   name: string
   delimiter?: string
@@ -84,6 +89,8 @@ export type AccountMailFolder = {
   attributes: string[]
   selectable: boolean
   selected: boolean
+  totalCount?: number
+  unreadCount?: number
 }
 
 export type MessageFilterTag = 'unread' | 'starred' | 'today' | 'yesterday' | 'last7'
@@ -91,6 +98,8 @@ export type MessageFilterTag = 'unread' | 'starred' | 'today' | 'yesterday' | 'l
 export type MessageListQuery = {
   accountId?: number
   folderId?: number
+  folderRole?: MailFolderRole
+  localDeletedOnly?: boolean
   filters?: MessageFilterTag[]
   keyword?: string
   search?: string
@@ -117,6 +126,7 @@ export type MailMessageSummary = {
   snippet?: string
   isRead: boolean
   isStarred: boolean
+  isAnswered: boolean
   hasAttachments: boolean
   bodyStatus: 'none' | 'loading' | 'ready' | 'error'
   verificationCode?: string
@@ -210,6 +220,16 @@ export type ForwardDraftInput = {
   messageId: number
 }
 
+export type BulkForwardDraftInput = {
+  messageIds: number[]
+}
+
+export type InlineImageSelection = {
+  filename: string
+  mimeType: string
+  dataUrl: string
+}
+
 export type ForwardAttachmentCandidate = {
   attachmentId: number
   filename: string
@@ -231,6 +251,7 @@ export type ComposeDraft = {
   inReplyTo?: string
   referencesHeader?: string
   forwardAttachments?: ForwardAttachmentCandidate[]
+  attachments?: MailAttachmentInput[]
 }
 
 export type OutboxMessage = {
@@ -391,6 +412,7 @@ export type AppSettings = {
   openAtLogin: boolean
   externalImagesBlocked: boolean
   locale: string
+  syncDeleteToRemote: boolean
 }
 
 export type SettingsUpdateInput = Partial<AppSettings>
@@ -545,8 +567,10 @@ export type OneMailApi = {
   compose: {
     createReplyDraft: (input: ReplyDraftInput) => Promise<ComposeDraft>
     createForwardDraft: (input: ForwardDraftInput) => Promise<ComposeDraft>
+    createBulkForwardDraft: (input: BulkForwardDraftInput) => Promise<ComposeDraft>
     send: (input: MailSendInput) => Promise<MailSendResult>
     selectAttachments: () => Promise<MailAttachmentInput[]>
+    selectInlineImage: () => Promise<InlineImageSelection | null>
     listOutbox: (query?: OutboxListQuery) => Promise<OutboxMessage[]>
     saveDraft: (input: MailSendInput) => Promise<OutboxMessage>
     deleteDraft: (outboxId: number) => Promise<boolean>

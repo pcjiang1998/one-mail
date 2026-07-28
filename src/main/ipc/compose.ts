@@ -1,5 +1,5 @@
-import { statSync } from 'node:fs'
-import { basename } from 'node:path'
+import { readFileSync, statSync } from 'node:fs'
+import { basename, extname } from 'node:path'
 import { BrowserWindow, dialog, ipcMain, type OpenDialogOptions } from 'electron'
 import { getAccount } from '../db/repositories/account.repository'
 import {
@@ -11,17 +11,20 @@ import {
   type OutboxRecord
 } from '../db/repositories/outbox.repository'
 import { createForwardDraft } from '../mail/forward-draft'
+import { createBulkForwardDraft } from '../mail/bulk-forward-draft'
 import { createMessageId } from '../mail/message-composer'
 import { createReplyDraft } from '../mail/reply-draft'
 import { retryOutboxEmail, sendPlainTextEmail } from '../mail/smtp-send'
 import type {
   ComposeDraft,
+  BulkForwardDraftInput,
   ForwardDraftInput,
   MailAttachmentInput,
   MailSendInput,
   MailSendResult,
   OutboxListQuery,
   OutboxMessage,
+  InlineImageSelection,
   ReplyDraftInput
 } from './types'
 
@@ -64,6 +67,10 @@ export function registerComposeIpc(): void {
       }))
     } satisfies ComposeDraft
   })
+
+  ipcMain.handle('compose/createBulkForwardDraft', (_event, input: BulkForwardDraftInput) =>
+    createBulkForwardDraft(input.messageIds)
+  )
 
   ipcMain.handle('compose/send', async (_event, input: MailSendInput): Promise<MailSendResult> => {
     const result = await sendPlainTextEmail({
@@ -125,6 +132,30 @@ export function registerComposeIpc(): void {
       } satisfies MailAttachmentInput
     })
   })
+
+  ipcMain.handle(
+    'compose/selectInlineImage',
+    async (event): Promise<InlineImageSelection | null> => {
+      const window = BrowserWindow.fromWebContents(event.sender)
+      const options: OpenDialogOptions = {
+        properties: ['openFile'],
+        filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp'] }]
+      }
+      const result = window
+        ? await dialog.showOpenDialog(window, options)
+        : await dialog.showOpenDialog(options)
+      const filePath = result.filePaths[0]
+      if (result.canceled || !filePath) return null
+      const content = readFileSync(filePath)
+      if (content.byteLength > 8 * 1024 * 1024) throw new Error('内联图片不能超过 8 MB。')
+      const mimeType = getImageMimeType(extname(filePath))
+      return {
+        filename: basename(filePath),
+        mimeType,
+        dataUrl: `data:${mimeType};base64,${content.toString('base64')}`
+      }
+    }
+  )
 
   ipcMain.handle('compose/listOutbox', (_event, query?: OutboxListQuery): OutboxMessage[] =>
     listOutboxRecords({
@@ -194,6 +225,14 @@ export function registerComposeIpc(): void {
     if (record.status === 'sending') throw new Error('发送中的记录不能直接删除。')
     return deleteOutboxRecord(outboxId)
   })
+}
+
+function getImageMimeType(extension: string): string {
+  const normalized = extension.toLowerCase()
+  if (normalized === '.jpg' || normalized === '.jpeg') return 'image/jpeg'
+  if (normalized === '.gif') return 'image/gif'
+  if (normalized === '.webp') return 'image/webp'
+  return 'image/png'
 }
 
 function broadcastSent(result: MailSendResult): void {

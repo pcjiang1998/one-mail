@@ -68,8 +68,10 @@
 
 @supports (padding-right: env(titlebar-area-width)) {
   :root[data-platform='win32'] {
-    --app-window-controls-width: max(138px,
-        calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)));
+    --app-window-controls-width: max(
+      138px,
+      calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw))
+    );
   }
 }
 
@@ -252,6 +254,15 @@
     color: var(--primary);
     text-decoration: underline;
     text-underline-offset: 3px;
+  }
+
+  .composer-body .composer-inline-image {
+    display: block;
+    width: auto;
+    max-width: min(100%, 720px);
+    max-height: 520px;
+    margin: 0.75rem 0;
+    object-fit: contain;
   }
 
   .composer-body [style*='text-align: center'] {

@@ -578,6 +578,7 @@ function persistFetchedHeaders(
       size_bytes,
       is_read,
       is_starred,
+      is_answered,
       flags_json,
       body_status
     )
@@ -595,6 +596,7 @@ function persistFetchedHeaders(
       :sizeBytes,
       :isRead,
       :isStarred,
+      :isAnswered,
       :flagsJson,
       'none'
     )
@@ -609,6 +611,7 @@ function persistFetchedHeaders(
       size_bytes = excluded.size_bytes,
       is_read = excluded.is_read,
       is_starred = excluded.is_starred,
+      is_answered = excluded.is_answered,
       flags_json = excluded.flags_json,
       updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
     `
@@ -655,6 +658,7 @@ function persistFetchedHeaders(
     UPDATE onemail_mail_messages
     SET is_read = :isRead,
         is_starred = :isStarred,
+        is_answered = :isAnswered,
         flags_json = :flagsJson,
         remote_deleted = 0,
         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
@@ -690,6 +694,7 @@ function persistFetchedHeaders(
         sizeBytes: item.sizeBytes,
         isRead: hasFlag(flags, 'Seen') ? 1 : 0,
         isStarred: hasFlag(flags, 'Flagged') ? 1 : 0,
+        isAnswered: hasFlag(flags, 'Answered') ? 1 : 0,
         flagsJson: JSON.stringify(Array.from(flags))
       }
 
@@ -736,6 +741,7 @@ function persistFetchedHeaders(
         uid: item.uid,
         isRead: hasFlag(parsedFlags, 'Seen') ? 1 : 0,
         isStarred: hasFlag(parsedFlags, 'Flagged') ? 1 : 0,
+        isAnswered: hasFlag(parsedFlags, 'Answered') ? 1 : 0,
         flagsJson: JSON.stringify(Array.from(parsedFlags))
       })
       if (result.changes > 0) updatedCount += 1

@@ -1,5 +1,5 @@
-appId: com.huzhihui.onemail
-productName: OneMail
+appId: com.pcjiang1998.onemailnext
+productName: OneMail Next
 directories:
   buildResources: build
 files:
@@ -17,7 +17,7 @@ asarUnpack:
   - resources/**
 afterPack: scripts/edit-win-executable.cjs
 win:
-  executableName: OneMail
+  executableName: OneMailNext
   icon: build/icon.ico
   signAndEditExecutable: false
 nsis:
@@ -53,7 +53,7 @@ linux:
     - AppImage
     - snap
     - deb
-  maintainer: huzhihui.com
+  maintainer: pcjiang1998
   category: Utility
 appImage:
   artifactName: ${name}-${version}-linux-${arch}.${ext}
@@ -62,4 +62,6 @@ deb:
 npmRebuild: false
 publish:
   provider: github
+  owner: pcjiang1998
+  repo: one-mail
   releaseType: release

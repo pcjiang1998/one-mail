@@ -1,5 +1,17 @@
 import * as React from 'react'
-import { CheckCheck, Paperclip, Search, Star, X } from 'lucide-react'
+import {
+  CheckCheck,
+  Files,
+  Forward,
+  MailOpen,
+  Paperclip,
+  Reply,
+  ReplyAll,
+  Search,
+  Star,
+  Trash2,
+  X
+} from 'lucide-react'
 import { toast } from 'sonner'
 
 import { formatAbsoluteTime, formatRelativeTime } from '@renderer/components/mail/date-format'
@@ -14,6 +26,13 @@ import { MailListSelectionToolbar } from '@renderer/components/mail/mail-list-se
 import type { Account, MailFilterTag, Message } from '@renderer/components/mail/types'
 import { Button } from '@renderer/components/ui/button'
 import { Checkbox } from '@renderer/components/ui/checkbox'
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger
+} from '@renderer/components/ui/context-menu'
 import {
   InputGroup,
   InputGroupAddon,
@@ -49,6 +68,11 @@ type MailListProps = {
   onClearSelection?: () => void
   onMarkSelectedRead?: () => void
   onDeleteSelected?: () => void
+  onPrepareContextSelection?: (messageId: string) => void
+  onMarkMessagesRead?: (messages: Message[]) => void
+  onReplyMessage?: (message: Message, replyAll: boolean) => void
+  onForwardMessages?: (messages: Message[], asAttachments: boolean) => void
+  onDeleteMessages?: (messages: Message[]) => void
 }
 
 export function MailList({
@@ -74,7 +98,12 @@ export function MailList({
   onSelectAllVisible,
   onClearSelection,
   onMarkSelectedRead,
-  onDeleteSelected
+  onDeleteSelected,
+  onPrepareContextSelection,
+  onMarkMessagesRead,
+  onReplyMessage,
+  onForwardMessages,
+  onDeleteMessages
 }: MailListProps): React.JSX.Element {
   const { locale, t } = useI18n()
   const scrollContainerRef = React.useRef<HTMLDivElement | null>(null)
@@ -188,18 +217,82 @@ export function MailList({
               {messages.map((message) => {
                 const messageSelected = message.id === selectedMessageId
                 const messageChecked = selectedMessageIds.has(message.id)
+                const contextMessages = messageChecked
+                  ? messages.filter((item) => selectedMessageIds.has(item.id))
+                  : [message]
 
                 return (
-                  <MessageListItem
-                    key={message.id}
-                    message={message}
-                    locale={locale}
-                    selected={messageSelected}
-                    checked={messageChecked}
-                    selectionDisabled={selectionDisabled}
-                    onToggleMessageSelection={onToggleMessageSelection}
-                    onSelectMessage={onSelectMessage}
-                  />
+                  <ContextMenu key={message.id}>
+                    <ContextMenuTrigger asChild>
+                      <MessageListItem
+                        message={message}
+                        locale={locale}
+                        selected={messageSelected}
+                        checked={messageChecked}
+                        selectionDisabled={selectionDisabled}
+                        onToggleMessageSelection={onToggleMessageSelection}
+                        onSelectMessage={onSelectMessage}
+                        onPrepareContextSelection={onPrepareContextSelection}
+                      />
+                    </ContextMenuTrigger>
+                    <ContextMenuContent className="w-48">
+                      <ContextMenuItem
+                        disabled={
+                          selectionDisabled || contextMessages.every((item) => !item.unread)
+                        }
+                        onSelect={() => onMarkMessagesRead?.(contextMessages)}
+                      >
+                        <MailOpen />
+                        {t('mail.context.markRead')}
+                      </ContextMenuItem>
+                      {contextMessages.length === 1 ? (
+                        <>
+                          <ContextMenuItem
+                            onSelect={() => onReplyMessage?.(contextMessages[0], false)}
+                          >
+                            <Reply />
+                            {t('mail.reader.reply')}
+                          </ContextMenuItem>
+                          <ContextMenuItem
+                            onSelect={() => onReplyMessage?.(contextMessages[0], true)}
+                          >
+                            <ReplyAll />
+                            {t('mail.reader.replyAll')}
+                          </ContextMenuItem>
+                          <ContextMenuItem
+                            onSelect={() => onForwardMessages?.(contextMessages, false)}
+                          >
+                            <Forward />
+                            {t('mail.reader.forward')}
+                          </ContextMenuItem>
+                        </>
+                      ) : (
+                        <>
+                          <ContextMenuItem
+                            onSelect={() => onForwardMessages?.(contextMessages, false)}
+                          >
+                            <Forward />
+                            {t('mail.context.forwardIndividually')}
+                          </ContextMenuItem>
+                          <ContextMenuItem
+                            onSelect={() => onForwardMessages?.(contextMessages, true)}
+                          >
+                            <Files />
+                            {t('mail.context.forwardAsAttachments')}
+                          </ContextMenuItem>
+                        </>
+                      )}
+                      <ContextMenuSeparator />
+                      <ContextMenuItem
+                        variant="destructive"
+                        disabled={selectionDisabled}
+                        onSelect={() => onDeleteMessages?.(contextMessages)}
+                      >
+                        <Trash2 />
+                        {t('common.delete')}
+                      </ContextMenuItem>
+                    </ContextMenuContent>
+                  </ContextMenu>
                 )
               })}
               <LoadMoreState loading={loadingMore} hasMore={hasMore} />
@@ -251,7 +344,8 @@ const MessageListItem = React.memo(function MessageListItem({
   checked,
   selectionDisabled,
   onToggleMessageSelection,
-  onSelectMessage
+  onSelectMessage,
+  onPrepareContextSelection
 }: {
   message: Message
   locale: AppLocale
@@ -260,6 +354,7 @@ const MessageListItem = React.memo(function MessageListItem({
   selectionDisabled?: boolean
   onToggleMessageSelection?: (messageId: string, range?: boolean) => void
   onSelectMessage: (messageId: string) => void
+  onPrepareContextSelection?: (messageId: string) => void
 }): React.JSX.Element {
   const { t } = useI18n()
   const absoluteTime = formatAbsoluteTime(message.receivedAt)
@@ -277,6 +372,7 @@ const MessageListItem = React.memo(function MessageListItem({
   const secondLineTooltip = verificationLabel
     ? `${verificationLabel} - ${displaySubject}${preview ? ` - ${preview}` : ''}`
     : `${displaySubject}${preview ? ` - ${preview}` : ''}`
+  const skipNextCheckedChangeRef = React.useRef(false)
 
   function handleSelectClick(event: React.MouseEvent<HTMLDivElement>): void {
     if (hasSelectionInside(event.currentTarget)) return
@@ -311,6 +407,7 @@ const MessageListItem = React.memo(function MessageListItem({
       tabIndex={0}
       onClick={handleSelectClick}
       onKeyDown={handleKeyDown}
+      onContextMenu={() => onPrepareContextSelection?.(message.id)}
       aria-selected={selected}
       className={cn(
         'grid w-full cursor-default grid-cols-[16px_10px_minmax(0,1fr)] gap-2 border-b px-4 py-2 text-left outline-none transition-colors select-text hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring',
@@ -323,16 +420,31 @@ const MessageListItem = React.memo(function MessageListItem({
           disabled={selectionDisabled}
           aria-label={t('mail.list.selectMessage', { subject: displaySubject })}
           onClick={(event) => event.stopPropagation()}
-          onCheckedChange={() => onToggleMessageSelection?.(message.id, false)}
+          onCheckedChange={() => {
+            if (skipNextCheckedChangeRef.current) {
+              skipNextCheckedChangeRef.current = false
+              return
+            }
+            onToggleMessageSelection?.(message.id, false)
+          }}
           onKeyDown={(event) => {
             if (event.key === ' ') event.stopPropagation()
           }}
           onPointerDown={(event) => {
             if (event.shiftKey) {
+              skipNextCheckedChangeRef.current = true
               event.preventDefault()
               event.stopPropagation()
               onToggleMessageSelection?.(message.id, true)
             }
+          }}
+          onPointerUp={() => {
+            window.setTimeout(() => {
+              skipNextCheckedChangeRef.current = false
+            }, 0)
+          }}
+          onPointerCancel={() => {
+            skipNextCheckedChangeRef.current = false
           }}
         />
       </span>
@@ -358,6 +470,11 @@ const MessageListItem = React.memo(function MessageListItem({
           ) : null}
           {message.attachments.length > 0 ? (
             <Paperclip className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+          ) : null}
+          {message.replied ? (
+            <span className="shrink-0 text-[10px] text-muted-foreground">
+              {t('mail.list.replied')}
+            </span>
           ) : null}
           <span className="shrink-0 text-muted-foreground" title={absoluteTime}>
             {formatRelativeTime(message.receivedAt, locale)}

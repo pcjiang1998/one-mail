@@ -33,7 +33,8 @@ describe('account provider presets', () => {
       smtpHost: '',
       smtpPort: 465,
       smtpSecurity: 'ssl_tls' as const,
-      smtpEnabled: true
+      smtpEnabled: true,
+      remoteDeletePolicy: 'inherit' as const
     }
 
     expect(schema.safeParse(customAccount).success).toBe(false)

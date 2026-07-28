@@ -72,6 +72,10 @@ export function registerAccountIpc(): void {
       throw new Error(`Account not found: ${input.accountId}`)
     }
 
+    if (isRemoteDeletePolicyOnlyUpdate(input)) {
+      return updateAccount(input)
+    }
+
     if (current.authType === 'oauth2' || input.authType === 'oauth2') {
       const account = updateAccount(normalizeOAuthAccountUpdate(input, current))
       if (input.selectedFolderPaths) {
@@ -140,6 +144,11 @@ export function registerAccountIpc(): void {
   })
 }
 
+function isRemoteDeletePolicyOnlyUpdate(input: AccountUpdateInput): boolean {
+  const keys = Object.keys(input).filter((key) => key !== 'accountId')
+  return keys.length === 1 && keys[0] === 'remoteDeletePolicy'
+}
+
 function normalizeOAuthAccountUpdate(
   input: AccountUpdateInput,
   current: NonNullable<ReturnType<typeof getAccount>>
@@ -160,6 +169,7 @@ function normalizeOAuthAccountUpdate(
     accountLabel: input.accountLabel,
     displayName: input.displayName,
     syncEnabled: input.syncEnabled,
+    remoteDeletePolicy: input.remoteDeletePolicy,
     selectedFolderPaths: input.selectedFolderPaths
   }
 }

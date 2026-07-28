@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { toSharedSendInput, toUiComposeDraft } from './api'
+import {
+  getFolderSelectionKey,
+  getLocalDeletedSelectionKey,
+  toMessageQuery,
+  toSharedSendInput,
+  toUiComposeDraft
+} from './api'
 
 describe('compose API mapping', () => {
   it('maps forward attachment candidates into selectable source attachments', () => {
@@ -76,5 +82,51 @@ describe('compose API mapping', () => {
     })
 
     expect(input.attachments).toEqual([{ filePath: '/tmp/report.pdf' }])
+  })
+
+  it('maps bulk-forward eml attachments into the composer', () => {
+    const attachments = [
+      {
+        filePath: 'C:\\Temp\\message.eml',
+        filename: 'message.eml',
+        mimeType: 'message/rfc822',
+        sizeBytes: 512
+      }
+    ]
+    const draft = toUiComposeDraft({
+      accountId: 1,
+      mode: 'forward',
+      to: [],
+      cc: [],
+      bcc: [],
+      attachments
+    })
+
+    expect(draft.attachments).toEqual(attachments)
+  })
+})
+
+describe('mailbox query mapping', () => {
+  it('limits the unified mailbox to inbox folders', () => {
+    expect(toMessageQuery('all', [])).toMatchObject({
+      accountId: undefined,
+      folderRole: 'inbox'
+    })
+  })
+
+  it('selects a concrete account folder', () => {
+    expect(toMessageQuery(getFolderSelectionKey(3, 42), [])).toMatchObject({
+      accountId: 3,
+      folderId: 42,
+      folderRole: undefined
+    })
+  })
+
+  it('selects the local deleted view', () => {
+    expect(toMessageQuery(getLocalDeletedSelectionKey(3), [])).toMatchObject({
+      accountId: 3,
+      localDeletedOnly: true,
+      folderRole: undefined
+    })
   })
 })

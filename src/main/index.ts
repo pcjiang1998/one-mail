@@ -153,7 +153,7 @@ function getCopyLinkMenuLabel(): string {
 // Some APIs can only be used after this event occurs.
 app.whenReady().then(() => {
   // Set app user model id for windows
-  electronApp.setAppUserModelId('com.huzhihui.onemail')
+  electronApp.setAppUserModelId('com.pcjiang1998.onemailnext')
   if (process.platform === 'darwin') {
     app.dock?.setIcon(appIcon)
   }

@@ -42,8 +42,10 @@ const api = {
   compose: {
     createReplyDraft: (input) => ipcRenderer.invoke('compose/createReplyDraft', input),
     createForwardDraft: (input) => ipcRenderer.invoke('compose/createForwardDraft', input),
+    createBulkForwardDraft: (input) => ipcRenderer.invoke('compose/createBulkForwardDraft', input),
     send: (input) => ipcRenderer.invoke('compose/send', input),
     selectAttachments: () => ipcRenderer.invoke('compose/selectAttachments'),
+    selectInlineImage: () => ipcRenderer.invoke('compose/selectInlineImage'),
     listOutbox: (query) => ipcRenderer.invoke('compose/listOutbox', query),
     saveDraft: (input) => ipcRenderer.invoke('compose/saveDraft', input),
     deleteDraft: (outboxId) => ipcRenderer.invoke('compose/deleteDraft', outboxId),

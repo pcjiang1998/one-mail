@@ -1,4 +1,10 @@
-import type { AuthType, ImapSecurity, SmtpSecurity } from '../../../../shared/types'
+import type {
+  AccountMailFolder,
+  AuthType,
+  ImapSecurity,
+  RemoteDeletePolicy,
+  SmtpSecurity
+} from '../../../../shared/types'
 
 export type MailFilterTag = 'unread' | 'starred' | 'today' | 'yesterday' | 'last7'
 
@@ -14,6 +20,8 @@ export type Account = {
   smtpPort?: number
   smtpSecurity?: SmtpSecurity
   smtpEnabled?: boolean
+  remoteDeletePolicy?: RemoteDeletePolicy
+  folders?: AccountMailFolder[]
   name: string
   address: string
   unread: number
@@ -72,5 +80,6 @@ export type Message = {
   dateLabel: string
   unread: boolean
   starred: boolean
+  replied?: boolean
   attachments: Attachment[]
 }

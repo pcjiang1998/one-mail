@@ -23,6 +23,7 @@ import type {
   MailMessageBody,
   MailMessageSummary,
   MailSendInput,
+  InlineImageSelection,
   MessageBulkReadStateResult,
   MessageReadStateUpdate,
   MessageFilterTag,
@@ -112,6 +113,12 @@ export type DeleteMessageResult = {
 export type BulkDeleteMessagesInput = {
   messageIds: number[]
   permanent?: boolean
+}
+
+export type MailboxSelection = {
+  accountId?: number
+  folderId?: number
+  localDeletedOnly?: boolean
 }
 
 export type BulkDeleteMessagesResult = {
@@ -432,6 +439,10 @@ export async function createComposeDraft(input: ComposeDraftInput): Promise<Comp
   return createLocalDraft(input)
 }
 
+export async function createBulkForwardComposeDraft(messageIds: number[]): Promise<ComposeDraft> {
+  return toUiComposeDraft(await window.api.compose.createBulkForwardDraft({ messageIds }))
+}
+
 export async function sendComposedMessage(input: SendMessageInput): Promise<SendMessageResult> {
   const result = await window.api.compose.send(toSharedSendInput(input))
   return {
@@ -446,13 +457,17 @@ export async function selectMailAttachments(): Promise<MailAttachmentInput[]> {
   return window.api.compose.selectAttachments()
 }
 
+export async function selectInlineMailImage(): Promise<InlineImageSelection | null> {
+  return window.api.compose.selectInlineImage()
+}
+
 export async function saveComposedDraft(input: SendMessageInput): Promise<OutboxMessage> {
   return toUiOutboxMessage(await window.api.compose.saveDraft(toSharedSendInput(input)))
 }
 
 export async function loadOutboxMessages(): Promise<OutboxMessage[]> {
   const messages = await window.api.compose.listOutbox({
-    statuses: ['draft', 'failed', 'sending'],
+    statuses: ['draft', 'queued', 'failed', 'sending'],
     limit: 100
   })
   return messages.map(toUiOutboxMessage)
@@ -479,7 +494,7 @@ export async function deleteDraftMessage(outboxId: number): Promise<boolean> {
 export async function deleteMessage(input: DeleteMessageInput): Promise<DeleteMessageResult> {
   const result = await window.api.messages.delete({
     messageId: input.messageId,
-    mode: 'permanent'
+    mode: input.permanent ? 'permanent' : 'trash'
   })
   return {
     messageId: result.messageId,
@@ -495,7 +510,7 @@ export async function bulkDeleteMessages(
 ): Promise<BulkDeleteMessagesResult> {
   return window.api.messages.bulkDelete({
     messageIds: input.messageIds,
-    mode: 'permanent'
+    mode: input.permanent ? 'permanent' : 'trash'
   })
 }
 
@@ -540,6 +555,8 @@ function toAccountList(accounts: MailAccount[], accountStats: AccountMailboxStat
       smtpPort: account.smtpPort,
       smtpSecurity: account.smtpSecurity,
       smtpEnabled: account.smtpEnabled,
+      remoteDeletePolicy: account.remoteDeletePolicy,
+      folders: account.folders,
       name: formatAccountName(account),
       address: account.email,
       unread: stats?.unreadCount ?? 0,
@@ -551,7 +568,7 @@ function toAccountList(accounts: MailAccount[], accountStats: AccountMailboxStat
     }
   })
 
-  if (accounts.length <= 2) {
+  if (accounts.length <= 1) {
     return accountItems
   }
 
@@ -565,7 +582,8 @@ function toAccountList(accounts: MailAccount[], accountStats: AccountMailboxStat
       unread: totalUnread,
       messageCount: totalMessages,
       status: accounts.length > 0 ? 'active' : 'empty',
-      accent: 'bg-primary'
+      accent: 'bg-primary',
+      folders: []
     },
     ...accountItems
   ]
@@ -618,6 +636,7 @@ function toMessage(message: MailMessageSummary | MailMessageDetail): Message {
     dateLabel: formatMessageDate(message.receivedAt),
     unread: !message.isRead,
     starred: message.isStarred,
+    replied: message.isAnswered,
     attachments:
       'attachments' in message
         ? message.attachments
@@ -660,6 +679,7 @@ export function toUiComposeDraft(draft: SharedComposeDraft): ComposeDraft {
     subject: draft.subject ?? '',
     bodyText: draft.bodyText ?? '',
     bodyHtml: draft.bodyHtml,
+    attachments: draft.attachments,
     forwardAttachments: draft.forwardAttachments?.map((attachment) => ({
       sourceMessageId: draft.relatedMessageId,
       sourceAttachmentId: attachment.attachmentId,
@@ -802,14 +822,41 @@ export function toMessageQuery(
   searchKeyword?: string
 ): MessageListQuery {
   const keyword = searchKeyword?.trim()
+  const selection = parseMailboxSelection(selectedAccountId)
 
   return {
-    accountId: selectedAccountId === 'all' ? undefined : Number(selectedAccountId),
+    accountId: selection.accountId,
+    folderId: selection.folderId,
+    folderRole:
+      selectedAccountId === 'all' || (!selection.folderId && !selection.localDeletedOnly)
+        ? 'inbox'
+        : undefined,
+    localDeletedOnly: selection.localDeletedOnly,
     filters,
     keyword: keyword || undefined,
     limit: pagination?.limit ?? MESSAGE_LIST_PAGE_SIZE,
     offset: pagination?.offset ?? 0
   }
+}
+
+export function getFolderSelectionKey(accountId: number, folderId: number): string {
+  return `${accountId}:folder:${folderId}`
+}
+
+export function getLocalDeletedSelectionKey(accountId: number): string {
+  return `${accountId}:deleted`
+}
+
+export function parseMailboxSelection(value: string): MailboxSelection {
+  if (!value || value === 'all') return {}
+  const folderMatch = /^(\d+):folder:(\d+)$/.exec(value)
+  if (folderMatch) {
+    return { accountId: Number(folderMatch[1]), folderId: Number(folderMatch[2]) }
+  }
+  const deletedMatch = /^(\d+):deleted$/.exec(value)
+  if (deletedMatch) return { accountId: Number(deletedMatch[1]), localDeletedOnly: true }
+  const accountId = Number(value)
+  return Number.isInteger(accountId) && accountId > 0 ? { accountId } : {}
 }
 
 function getStaticTranslation(key: Parameters<typeof translate>[1]): string {

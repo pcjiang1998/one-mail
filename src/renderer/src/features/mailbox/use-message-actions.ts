@@ -60,7 +60,7 @@ export function useMessageActions({
       if (deleteRequest.messages.length === 1) {
         const result = await deleteMessage({
           messageId: deleteRequest.messages[0].messageId,
-          permanent: true
+          permanent: false
         })
         handleSingleDeleteResult(result, t)
         if (result.deleted || result.hidden) {
@@ -73,7 +73,7 @@ export function useMessageActions({
 
       const result = await bulkDeleteMessages({
         messageIds: deleteRequest.messages.map((message) => message.messageId),
-        permanent: true
+        permanent: false
       })
       handleBulkDeleteResult(result, t)
       if (result.succeededMessageIds.length > 0) {

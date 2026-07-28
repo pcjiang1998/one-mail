@@ -8,7 +8,8 @@ const defaultSettings: AppSettings = {
   syncWindowDays: 90,
   openAtLogin: false,
   externalImagesBlocked: true,
-  locale: 'zh-CN'
+  locale: 'zh-CN',
+  syncDeleteToRemote: true
 }
 
 const settingsDefinition = {
@@ -17,6 +18,7 @@ const settingsDefinition = {
   openAtLogin: { key: 'open_at_login', type: 'boolean' },
   externalImagesBlocked: { key: 'external_images_blocked', type: 'boolean' },
   locale: { key: 'locale', type: 'string' },
+  syncDeleteToRemote: { key: 'sync_delete_to_remote', type: 'boolean' },
   lastAttachmentDownloadDir: { key: 'last_attachment_download_dir', type: 'string' },
   backupSyncSettings: { key: 'backup_sync_settings', type: 'json' }
 } as const
@@ -57,7 +59,11 @@ export function getSettings(): AppSettings {
       byKey.get(settingsDefinition.externalImagesBlocked.key),
       true
     ),
-    locale: byKey.get(settingsDefinition.locale.key)?.setting_value ?? defaultSettings.locale
+    locale: byKey.get(settingsDefinition.locale.key)?.setting_value ?? defaultSettings.locale,
+    syncDeleteToRemote: readBoolean(
+      byKey.get(settingsDefinition.syncDeleteToRemote.key),
+      defaultSettings.syncDeleteToRemote
+    )
   }
 }
 
@@ -90,6 +96,11 @@ export function updateSettings(input: SettingsUpdateInput): AppSettings {
     settingsDefinition.externalImagesBlocked.type
   )
   writeSetting(settingsDefinition.locale.key, next.locale, settingsDefinition.locale.type)
+  writeSetting(
+    settingsDefinition.syncDeleteToRemote.key,
+    next.syncDeleteToRemote ? '1' : '0',
+    settingsDefinition.syncDeleteToRemote.type
+  )
 
   return getSettings()
 }
@@ -160,6 +171,11 @@ function ensureDefaultSettings(): void {
     settingsDefinition.locale.key,
     defaultSettings.locale,
     settingsDefinition.locale.type
+  )
+  updateMissingSetting(
+    settingsDefinition.syncDeleteToRemote.key,
+    defaultSettings.syncDeleteToRemote ? '1' : '0',
+    settingsDefinition.syncDeleteToRemote.type
   )
 }
 

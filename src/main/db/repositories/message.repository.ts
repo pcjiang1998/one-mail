@@ -26,6 +26,7 @@ type MessageRow = SqliteRow & {
   snippet: string | null
   is_read: number
   is_starred: number
+  is_answered?: number
   has_attachments: number
   body_status: MailMessageSummary['bodyStatus']
   body_text?: string | null
@@ -112,6 +113,7 @@ export type MessageDeleteTarget = {
   folderPath: string
   folderRole: string
   uid: number
+  rfc822MessageId?: string
   remoteDeleted: boolean
   userHidden: boolean
   userDeleted: boolean
@@ -143,6 +145,7 @@ export function listMessages(query?: MessageListQuery): MailMessageSummary[] {
         m.snippet,
         m.is_read,
         m.is_starred,
+        m.is_answered,
         m.has_attachments,
         m.body_status,
         b.body_text,
@@ -183,7 +186,10 @@ export function listUnreadMessageIds(query?: MessageListQuery): number[] {
 }
 
 function buildMessageListQueryParts(query?: MessageListQuery): MessageListQueryParts {
-  const where: string[] = ['m.remote_deleted = 0', 'm.user_hidden = 0']
+  const where: string[] = [
+    'm.remote_deleted = 0',
+    query?.localDeletedOnly ? 'm.user_hidden = 1' : 'm.user_hidden = 0'
+  ]
   const params: Record<string, string | number> = {}
 
   if (query?.accountId !== undefined) {
@@ -194,6 +200,11 @@ function buildMessageListQueryParts(query?: MessageListQuery): MessageListQueryP
   if (query?.folderId !== undefined) {
     where.push('m.folder_id = :folderId')
     params.folderId = query.folderId
+  }
+
+  if (query?.folderRole !== undefined) {
+    where.push('f.role = :folderRole')
+    params.folderRole = query.folderRole
   }
 
   const filters = new Set(query?.filters ?? [])
@@ -282,6 +293,7 @@ export function listAccountMailboxStats(): AccountMailboxStats[] {
           f.unread_count
         FROM onemail_mail_folders f
         WHERE f.sync_enabled = 1
+          AND f.role = 'inbox'
           AND (f.total_count > 0 OR f.unread_count > 0)
         UNION ALL
         SELECT
@@ -289,13 +301,16 @@ export function listAccountMailboxStats(): AccountMailboxStats[] {
           COUNT(*) AS total_count,
           SUM(CASE WHEN m.is_read = 0 THEN 1 ELSE 0 END) AS unread_count
         FROM onemail_mail_messages m
+        JOIN onemail_mail_folders mf ON mf.folder_id = m.folder_id
         WHERE m.remote_deleted = 0
           AND m.user_hidden = 0
+          AND mf.role = 'inbox'
           AND NOT EXISTS (
             SELECT 1
             FROM onemail_mail_folders f
             WHERE f.account_id = m.account_id
               AND f.sync_enabled = 1
+              AND f.role = 'inbox'
               AND (f.total_count > 0 OR f.unread_count > 0)
           )
         GROUP BY m.account_id
@@ -334,6 +349,7 @@ export function listRecentNotificationMessages(
         m.snippet,
         m.is_read,
         m.is_starred,
+        m.is_answered,
         m.has_attachments,
         m.body_status,
         b.body_text,
@@ -387,6 +403,7 @@ export function getMessage(messageId: number): MailMessageDetail | null {
         m.snippet,
         m.is_read,
         m.is_starred,
+        m.is_answered,
         m.has_attachments,
         m.body_status,
         b.body_text,
@@ -569,6 +586,7 @@ export function getMessageDeleteTarget(messageId: number): MessageDeleteTarget |
         folder_path: string
         folder_role: string
         uid: number
+        rfc822_message_id: string | null
         remote_deleted: number
         user_hidden: number
         user_deleted: number
@@ -582,6 +600,7 @@ export function getMessageDeleteTarget(messageId: number): MessageDeleteTarget |
         f.path AS folder_path,
         f.role AS folder_role,
         m.uid,
+        m.rfc822_message_id,
         m.remote_deleted,
         m.user_hidden,
         m.user_deleted
@@ -601,6 +620,7 @@ export function getMessageDeleteTarget(messageId: number): MessageDeleteTarget |
     folderPath: row.folder_path,
     folderRole: row.folder_role,
     uid: toNumber(row.uid),
+    rfc822MessageId: toOptionalString(row.rfc822_message_id),
     remoteDeleted: toBoolean(row.remote_deleted),
     userHidden: toBoolean(row.user_hidden),
     userDeleted: toBoolean(row.user_deleted)
@@ -665,6 +685,58 @@ export function markMessageUserHidden(messageId: number): void {
   })
 }
 
+export function markMessageMovedToTrash(
+  messageId: number,
+  trashFolderId: number,
+  destinationUid?: number
+): void {
+  const db = getDatabase()
+  const target = getMessageDeleteTarget(messageId)
+  if (!target) throw new Error('邮件不存在。')
+
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    if (destinationUid) {
+      db.prepare(
+        `
+        DELETE FROM onemail_mail_messages
+        WHERE account_id = :accountId
+          AND folder_id = :folderId
+          AND uid = :uid
+          AND message_id <> :messageId
+        `
+      ).run({
+        accountId: target.accountId,
+        folderId: trashFolderId,
+        uid: destinationUid,
+        messageId
+      })
+    }
+
+    db.prepare(
+      `
+      UPDATE onemail_mail_messages
+      SET folder_id = CASE WHEN :destinationUid IS NULL THEN folder_id ELSE :trashFolderId END,
+          uid = COALESCE(:destinationUid, uid),
+          user_hidden = 1,
+          user_deleted = 1,
+          delete_error = NULL,
+          deleted_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+          last_operation_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+      WHERE message_id = :messageId
+      `
+    ).run({ messageId, trashFolderId, destinationUid: destinationUid ?? null })
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+
+  refreshFolderUnreadCount(target.folderId)
+  if (destinationUid && trashFolderId !== target.folderId) refreshFolderUnreadCount(trashFolderId)
+}
+
 export function restoreMessageLocally(messageId: number): void {
   updateMessageDeleteState(messageId, {
     user_hidden: 0,
@@ -712,6 +784,7 @@ function mapMessageSummaryRow(row: MessageRow): MailMessageSummary {
     snippet: toOptionalString(row.snippet),
     isRead: toBoolean(row.is_read),
     isStarred: toBoolean(row.is_starred),
+    isAnswered: toBoolean(row.is_answered),
     hasAttachments: toBoolean(row.has_attachments),
     bodyStatus: row.body_status,
     verificationCode: extractVerificationCode(

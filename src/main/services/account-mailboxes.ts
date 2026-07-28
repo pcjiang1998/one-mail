@@ -30,6 +30,9 @@ export async function updateAccountFolderSelection(
 
   if (!inbox) throw new Error('IMAP 服务器未返回可选择的 INBOX。')
   requestedKeys.add(normalizePath(inbox.path))
+  for (const mailbox of selectable) {
+    if (isDefaultFolderRole(mailbox.role)) requestedKeys.add(normalizePath(mailbox.path))
+  }
 
   for (const key of requestedKeys) {
     if (!pathsByKey.has(key)) throw new Error(`文件夹已不存在或不可选择：${key}`)
@@ -85,7 +88,9 @@ function applyStoredSelection(accountId: number, mailboxes: ImapMailbox[]): Acco
     ...mailbox,
     selected:
       mailbox.selectable &&
-      (mailbox.role === 'inbox' || (hasSelection && selectedKeys.has(normalizePath(mailbox.path))))
+      (mailbox.role === 'inbox' ||
+        (hasSelection && selectedKeys.has(normalizePath(mailbox.path))) ||
+        (!hasSelection && isDefaultFolderRole(mailbox.role)))
   }))
 }
 
@@ -201,4 +206,10 @@ function folderSortOrder(role: ImapMailbox['role'], index: number): number {
 
 function normalizePath(path: string): string {
   return path.trim().toLocaleLowerCase('en-US')
+}
+
+function isDefaultFolderRole(role: ImapMailbox['role']): boolean {
+  return (
+    role === 'inbox' || role === 'sent' || role === 'drafts' || role === 'junk' || role === 'trash'
+  )
 }

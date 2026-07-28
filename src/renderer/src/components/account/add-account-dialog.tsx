@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as React from 'react'
-import { useForm } from 'react-hook-form'
+import { Controller, useForm } from 'react-hook-form'
 
 import { ResponsiveDialog } from '@renderer/components/responsive-dialog'
 import { Alert, AlertDescription } from '@renderer/components/ui/alert'
@@ -103,7 +103,8 @@ export function AddAccountForm({
         smtpPort: values.kind === 'custom' ? values.smtpPort : preset.smtpPort,
         smtpSecurity: values.kind === 'custom' ? values.smtpSecurity : preset.smtpSecurity,
         smtpAuthType: values.kind === 'custom' ? values.authType : preset.smtpAuthType,
-        smtpEnabled: values.kind === 'custom' ? values.smtpEnabled : preset.smtpEnabled
+        smtpEnabled: values.kind === 'custom' ? values.smtpEnabled : preset.smtpEnabled,
+        remoteDeletePolicy: values.remoteDeletePolicy
       })
       form.reset(defaultAccountFormValues)
       setKind(defaultAccountFormValues.kind)
@@ -146,8 +147,30 @@ export function AddAccountForm({
           </Select>
         </AccountFormField>
 
-        <FieldGroup className="gap-2.5">{renderProviderForm(kind, form, t)}</FieldGroup>
-
+        <FieldGroup className="gap-2.5">
+          {renderProviderForm(kind, form, t)}
+          <AccountFormField
+            id="account-remote-delete-policy"
+            label={t('account.form.remoteDeletePolicy')}
+          >
+            <Controller
+              control={form.control}
+              name="remoteDeletePolicy"
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger id="account-remote-delete-policy" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="inherit">{t('settings.mailOperations.inherit')}</SelectItem>
+                    <SelectItem value="enabled">{t('common.yes')}</SelectItem>
+                    <SelectItem value="disabled">{t('common.no')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </AccountFormField>
+        </FieldGroup>
       </div>
 
       <div className={footerClassName}>

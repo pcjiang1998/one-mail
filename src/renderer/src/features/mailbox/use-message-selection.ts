@@ -24,6 +24,7 @@ export function useMessageSelection({ messages, resetKey }: UseMessageSelectionI
   selectAllVisible: () => void
   isMessageSelected: (messageId: string) => boolean
   toggleMessageSelection: (messageId: string, range?: boolean) => void
+  selectMessageForContext: (messageId: string) => void
 } {
   const [selection, setSelection] = React.useState<SelectionState>(() => ({
     scopeKey: resetKey,
@@ -100,6 +101,22 @@ export function useMessageSelection({ messages, resetKey }: UseMessageSelectionI
     [selectedMessageIds]
   )
 
+  const selectMessageForContext = React.useCallback(
+    (messageId: string): void => {
+      setSelection((current) => {
+        const currentIds =
+          current.scopeKey === resetKey ? current.selectedMessageIds : new Set<string>()
+        if (currentIds.has(messageId)) return current
+        return {
+          scopeKey: resetKey,
+          selectedMessageIds: new Set([messageId]),
+          lastSelectedMessageId: messageId
+        }
+      })
+    },
+    [resetKey]
+  )
+
   const selectedMessages = React.useMemo(
     () => messages.filter((message) => selectedMessageIds.has(message.id)),
     [messages, selectedMessageIds]
@@ -118,6 +135,7 @@ export function useMessageSelection({ messages, resetKey }: UseMessageSelectionI
     clearSelection,
     selectAllVisible,
     isMessageSelected,
-    toggleMessageSelection
+    toggleMessageSelection,
+    selectMessageForContext
   }
 }

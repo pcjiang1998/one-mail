@@ -24,14 +24,16 @@ const TABLE_COLUMN_UPGRADES: Record<string, ColumnDefinition[]> = {
     },
     {
       name: 'smtp_requires_auth',
-      definition: 'smtp_requires_auth INTEGER NOT NULL DEFAULT 1 CHECK (smtp_requires_auth IN (0, 1))'
+      definition:
+        'smtp_requires_auth INTEGER NOT NULL DEFAULT 1 CHECK (smtp_requires_auth IN (0, 1))'
     }
   ],
   onemail_mail_accounts: [
     { name: 'smtp_host', definition: 'smtp_host TEXT' },
     {
       name: 'smtp_port',
-      definition: 'smtp_port INTEGER CHECK (smtp_port IS NULL OR (smtp_port > 0 AND smtp_port <= 65535))'
+      definition:
+        'smtp_port INTEGER CHECK (smtp_port IS NULL OR (smtp_port > 0 AND smtp_port <= 65535))'
     },
     {
       name: 'smtp_security',
@@ -45,6 +47,11 @@ const TABLE_COLUMN_UPGRADES: Record<string, ColumnDefinition[]> = {
     {
       name: 'smtp_enabled',
       definition: 'smtp_enabled INTEGER NOT NULL DEFAULT 1 CHECK (smtp_enabled IN (0, 1))'
+    },
+    {
+      name: 'remote_delete_policy',
+      definition:
+        "remote_delete_policy TEXT NOT NULL DEFAULT 'inherit' CHECK (remote_delete_policy IN ('inherit', 'enabled', 'disabled'))"
     }
   ],
   onemail_mail_messages: [

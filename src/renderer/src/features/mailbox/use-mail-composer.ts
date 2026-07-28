@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import type { Account, Message } from '@renderer/components/mail/types'
 import {
   createComposeDraft,
+  createBulkForwardComposeDraft,
   saveComposedDraft,
   sendComposedMessage,
   type ComposeDraft,
@@ -30,6 +31,7 @@ export function useMailComposer({ accounts, selectedAccount, setError }: UseMail
   composerDraft: ComposeDraft | null
   composerPending: boolean
   openComposer: (kind: ComposeKind, message?: Message) => Promise<void>
+  openForwardMessages: (messages: Message[], asAttachments: boolean) => Promise<void>
   openOutboxDraft: (outbox: OutboxMessage) => void
   closeComposer: () => void
   sendComposerDraft: (input: SendMessageInput) => Promise<void>
@@ -38,6 +40,7 @@ export function useMailComposer({ accounts, selectedAccount, setError }: UseMail
 } {
   const { t } = useI18n()
   const [composer, setComposer] = React.useState<ComposerState>({ open: false, draft: null })
+  const forwardDraftQueueRef = React.useRef<ComposeDraft[]>([])
   const [composerPending, setComposerPending] = React.useState(false)
 
   const openComposer = React.useCallback(
@@ -57,6 +60,7 @@ export function useMailComposer({ accounts, selectedAccount, setError }: UseMail
           accountId,
           relatedMessageId: message?.messageId
         })
+        forwardDraftQueueRef.current = []
         setComposer({
           open: true,
           draft: prepareDraft(draft, kind, accountId, message)
@@ -72,14 +76,57 @@ export function useMailComposer({ accounts, selectedAccount, setError }: UseMail
     [accounts, selectedAccount, setError, t]
   )
 
+  const openForwardMessages = React.useCallback(
+    async (messages: Message[], asAttachments: boolean): Promise<void> => {
+      if (messages.length === 0) return
+      setComposerPending(true)
+      setError(null)
+
+      try {
+        if (asAttachments) {
+          const draft = await createBulkForwardComposeDraft(
+            messages.map((message) => message.messageId)
+          )
+          forwardDraftQueueRef.current = []
+          setComposer({ open: true, draft })
+          return
+        }
+
+        const drafts: ComposeDraft[] = []
+        for (const message of messages) {
+          const accountId = getComposeAccountId(accounts, selectedAccount, message)
+          if (!accountId) continue
+          const draft = await createComposeDraft({
+            kind: 'forward',
+            accountId,
+            relatedMessageId: message.messageId
+          })
+          drafts.push(prepareDraft(draft, 'forward', accountId, message))
+        }
+        const [first, ...remaining] = drafts
+        if (!first) throw new Error(t('mail.composer.noSendingAccount'))
+        forwardDraftQueueRef.current = remaining
+        setComposer({ open: true, draft: first })
+      } catch (composeError) {
+        const errorMessage = getErrorMessage(composeError, t('mail.composer.createDraftError'))
+        setError(errorMessage)
+        toast.error(errorMessage)
+      } finally {
+        setComposerPending(false)
+      }
+    },
+    [accounts, selectedAccount, setError, t]
+  )
+
   const closeComposer = React.useCallback((): void => {
     if (composerPending) return
-    setComposer({ open: false, draft: null })
+    advanceForwardQueue(forwardDraftQueueRef, setComposer)
   }, [composerPending])
 
   const openOutboxDraft = React.useCallback(
     (outbox: OutboxMessage): void => {
       setError(null)
+      forwardDraftQueueRef.current = []
       setComposer({
         open: true,
         draft: {
@@ -120,7 +167,7 @@ export function useMailComposer({ accounts, selectedAccount, setError }: UseMail
             ? t('mail.composer.sentWithWarning', { warning: result.warning })
             : t('mail.composer.sent')
         )
-        setComposer({ open: false, draft: null })
+        advanceForwardQueue(forwardDraftQueueRef, setComposer)
       } catch (sendError) {
         const errorMessage = getErrorMessage(sendError, t('mail.composer.sendError'))
         setError(errorMessage)
@@ -139,29 +186,9 @@ export function useMailComposer({ accounts, selectedAccount, setError }: UseMail
       setError(null)
 
       try {
-        const savedDraft = await saveComposedDraft(input)
+        await saveComposedDraft(input)
         toast.success(t('mail.composer.draftSaved'))
-        setComposer({
-          open: false,
-          draft: {
-            draftId: savedDraft.outboxId,
-            kind: savedDraft.kind,
-            accountId: savedDraft.accountId,
-            relatedMessageId: savedDraft.relatedMessageId,
-            to: savedDraft.to,
-            cc: savedDraft.cc,
-            bcc: savedDraft.bcc,
-            subject: savedDraft.subject,
-            bodyText: savedDraft.bodyText,
-            bodyHtml: savedDraft.bodyHtml,
-            attachments: savedDraft.attachments,
-            forwardAttachments: savedDraft.attachments.filter((attachment) =>
-              Boolean(attachment.sourceAttachmentId)
-            ),
-            inReplyTo: savedDraft.inReplyTo,
-            references: savedDraft.references
-          }
-        })
+        advanceForwardQueue(forwardDraftQueueRef, setComposer)
       } catch (saveError) {
         const errorMessage = getErrorMessage(saveError, t('mail.composer.saveDraftError'))
         setError(errorMessage)
@@ -176,7 +203,7 @@ export function useMailComposer({ accounts, selectedAccount, setError }: UseMail
 
   const discardComposerDraft = React.useCallback((): void => {
     if (composerPending) return
-    setComposer({ open: false, draft: null })
+    advanceForwardQueue(forwardDraftQueueRef, setComposer)
   }, [composerPending])
 
   return {
@@ -184,12 +211,22 @@ export function useMailComposer({ accounts, selectedAccount, setError }: UseMail
     composerDraft: composer.draft,
     composerPending,
     openComposer,
+    openForwardMessages,
     openOutboxDraft,
     closeComposer,
     sendComposerDraft,
     saveComposerDraft,
     discardComposerDraft
   }
+}
+
+function advanceForwardQueue(
+  queueRef: { current: ComposeDraft[] },
+  setComposer: React.Dispatch<React.SetStateAction<ComposerState>>
+): void {
+  const [next, ...remaining] = queueRef.current
+  queueRef.current = remaining
+  setComposer(next ? { open: true, draft: next } : { open: false, draft: null })
 }
 
 function getComposeAccountId(

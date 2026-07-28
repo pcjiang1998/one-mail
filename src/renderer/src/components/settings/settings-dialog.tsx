@@ -11,6 +11,7 @@ import {
   KeyRound,
   Languages,
   LoaderCircle,
+  Settings2,
   Power,
   RefreshCcw,
   Save,
@@ -70,6 +71,8 @@ import type {
 import { cn } from '@renderer/lib/utils'
 import { useI18n, type TranslationKey } from '@renderer/lib/i18n'
 import { ONEMAIL_HOMEPAGE_URL, hasAvailableUpdate } from '@renderer/lib/update-status'
+import type { Account } from '@renderer/components/mail/types'
+import type { RemoteDeletePolicy } from '../../../../shared/types'
 
 type SettingsDialogProps = {
   open: boolean
@@ -80,9 +83,11 @@ type SettingsDialogProps = {
   onOpenChange: (open: boolean) => void
   onSubmit: (input: SettingsUpdateInput) => Promise<void>
   onImported?: () => Promise<void> | void
+  accounts: Account[]
+  onUpdateAccountPolicy: (accountId: number, policy: RemoteDeletePolicy) => Promise<void>
 }
 
-type SettingsSection = 'general' | 'backup' | 'about'
+type SettingsSection = 'general' | 'mailOperations' | 'backup' | 'about'
 type BackupPending =
   | 'export'
   | 'import'
@@ -104,6 +109,7 @@ type SettingsFormValues = {
   openAtLogin: boolean
   externalImagesBlocked: boolean
   locale: 'zh-CN' | 'en-US'
+  syncDeleteToRemote: boolean
 }
 
 const sections: Array<{
@@ -111,6 +117,11 @@ const sections: Array<{
   labelKey: TranslationKey
   icon: React.ComponentType<React.SVGProps<SVGSVGElement>>
 }> = [
+  {
+    value: 'mailOperations',
+    labelKey: 'settings.mailOperations',
+    icon: Settings2
+  },
   {
     value: 'general',
     labelKey: 'settings.general',
@@ -136,7 +147,9 @@ export function SettingsDialog({
   initialSection = 'general',
   onOpenChange,
   onSubmit,
-  onImported
+  onImported,
+  accounts,
+  onUpdateAccountPolicy
 }: SettingsDialogProps): React.JSX.Element {
   const { t } = useI18n()
   const settingsSchema = React.useMemo(() => createSettingsSchema(t), [t])
@@ -190,7 +203,8 @@ export function SettingsDialog({
             syncWindowDays: currentValues.syncWindowDays,
             openAtLogin: currentValues.openAtLogin,
             externalImagesBlocked: currentValues.externalImagesBlocked,
-            locale: currentValues.locale
+            locale: currentValues.locale,
+            syncDeleteToRemote: currentValues.syncDeleteToRemote
           })
           lastSavedValuesRef.current = currentValues
         } catch (submitError) {
@@ -441,6 +455,12 @@ export function SettingsDialog({
           <div className="h-full min-h-0 overflow-auto">
             {section === 'general' ? (
               <GeneralSettingsForm form={form} error={error} />
+            ) : section === 'mailOperations' ? (
+              <MailOperationsSettings
+                form={form}
+                accounts={accounts}
+                onUpdateAccountPolicy={onUpdateAccountPolicy}
+              />
             ) : section === 'backup' ? (
               <BackupSettings
                 key={getBackupSyncSettingsKey(backupSyncSettings)}
@@ -474,6 +494,94 @@ export function SettingsDialog({
         onImported={handleBackupImported}
       />
     </>
+  )
+}
+
+function MailOperationsSettings({
+  form,
+  accounts,
+  onUpdateAccountPolicy
+}: {
+  form: ReturnType<typeof useForm<SettingsFormValues>>
+  accounts: Account[]
+  onUpdateAccountPolicy: (accountId: number, policy: RemoteDeletePolicy) => Promise<void>
+}): React.JSX.Element {
+  const { t } = useI18n()
+  const [pendingAccountId, setPendingAccountId] = React.useState<number | null>(null)
+  const [policyError, setPolicyError] = React.useState<string | null>(null)
+
+  async function handlePolicyChange(accountId: number, policy: RemoteDeletePolicy): Promise<void> {
+    setPendingAccountId(accountId)
+    setPolicyError(null)
+    try {
+      await onUpdateAccountPolicy(accountId, policy)
+    } catch (updateError) {
+      setPolicyError(updateError instanceof Error ? updateError.message : t('settings.updateError'))
+    } finally {
+      setPendingAccountId(null)
+    }
+  }
+
+  return (
+    <div className="p-4">
+      <FieldGroup className="gap-4">
+        <Controller
+          control={form.control}
+          name="syncDeleteToRemote"
+          render={({ field }) => (
+            <Field orientation="horizontal" className="items-center justify-between border-b pb-4">
+              <FieldContent>
+                <FieldLabel>{t('settings.mailOperations.syncDeleteTitle')}</FieldLabel>
+                <FieldDescription>
+                  {t('settings.mailOperations.syncDeleteDescription')}
+                </FieldDescription>
+              </FieldContent>
+              <Switch checked={field.value} onCheckedChange={field.onChange} />
+            </Field>
+          )}
+        />
+
+        <div>
+          <h3 className="text-sm font-medium">{t('settings.mailOperations.accountsTitle')}</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t('settings.mailOperations.accountDescription')}
+          </p>
+          <div className="mt-3 border-y">
+            {accounts.map((account) =>
+              account.accountId ? (
+                <div
+                  key={account.accountId}
+                  className="flex min-h-12 items-center gap-3 border-b py-2 last:border-b-0"
+                >
+                  <span className="min-w-0 flex-1 truncate text-sm">
+                    {account.name || account.address}
+                  </span>
+                  <Select
+                    value={account.remoteDeletePolicy ?? 'inherit'}
+                    disabled={pendingAccountId === account.accountId}
+                    onValueChange={(value) =>
+                      void handlePolicyChange(account.accountId!, value as RemoteDeletePolicy)
+                    }
+                  >
+                    <SelectTrigger className="w-36">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="inherit">
+                        {t('settings.mailOperations.inherit')}
+                      </SelectItem>
+                      <SelectItem value="enabled">{t('common.yes')}</SelectItem>
+                      <SelectItem value="disabled">{t('common.no')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null
+            )}
+          </div>
+          {policyError ? <FieldError className="mt-2">{policyError}</FieldError> : null}
+        </div>
+      </FieldGroup>
+    </div>
   )
 }
 
@@ -772,7 +880,7 @@ function AboutSettings({
       <FieldGroup className="gap-2.5">
         <SettingRow
           icon={BadgeInfo}
-          title="OneMail"
+          title="OneMail Next"
           description={
             <span>
               {t('settings.about.versionPrefix')}{' '}
@@ -795,13 +903,47 @@ function AboutSettings({
             <Button
               variant="outline"
               size="sm"
-              onClick={() => void openExternalUrl('https://github.com/zhihui-hu/one-mail')}
+              onClick={() => void openExternalUrl(ONEMAIL_HOMEPAGE_URL)}
             >
               <ExternalLink data-icon="inline-start" />
               GitHub
             </Button>
           }
         />
+        <div className="border-t pt-3 text-xs leading-6 text-muted-foreground">
+          <p>{t('settings.about.basedOn')}</p>
+          <p>
+            {t('settings.about.originalOwner')}{' '}
+            <button
+              type="button"
+              className="text-foreground underline underline-offset-2"
+              onClick={() => void openExternalUrl('https://github.com/zhihui-hu')}
+            >
+              zhihui-hu
+            </button>
+          </p>
+          <p>
+            {t('settings.about.modifier')}{' '}
+            <button
+              type="button"
+              className="text-foreground underline underline-offset-2"
+              onClick={() => void openExternalUrl('https://github.com/pcjiang1998')}
+            >
+              pcjiang1998
+            </button>
+          </p>
+          <p>
+            {t('settings.about.website')}{' '}
+            <button
+              type="button"
+              className="break-all text-foreground underline underline-offset-2"
+              onClick={() => void openExternalUrl(ONEMAIL_HOMEPAGE_URL)}
+            >
+              {ONEMAIL_HOMEPAGE_URL}
+            </button>
+          </p>
+          <p>{t('settings.about.license')}</p>
+        </div>
       </FieldGroup>
     </div>
   )
@@ -930,7 +1072,8 @@ function createSettingsSchema(t: (key: TranslationKey) => string) {
       .max(3650, t('settings.syncWindow.errorMax')),
     openAtLogin: z.boolean(),
     externalImagesBlocked: z.boolean(),
-    locale: z.enum(['zh-CN', 'en-US'])
+    locale: z.enum(['zh-CN', 'en-US']),
+    syncDeleteToRemote: z.boolean()
   })
 }
 
@@ -940,7 +1083,8 @@ function toFormValues(settings: AppSettings | null): SettingsFormValues {
     syncWindowDays: settings?.syncWindowDays ?? 90,
     openAtLogin: settings?.openAtLogin === true,
     externalImagesBlocked: settings?.externalImagesBlocked !== false,
-    locale: settings?.locale === 'en-US' ? 'en-US' : 'zh-CN'
+    locale: settings?.locale === 'en-US' ? 'en-US' : 'zh-CN',
+    syncDeleteToRemote: settings?.syncDeleteToRemote !== false
   }
 }
 
@@ -950,6 +1094,7 @@ function areSettingsEqual(first: SettingsFormValues, second: SettingsFormValues)
     first.syncWindowDays === second.syncWindowDays &&
     first.openAtLogin === second.openAtLogin &&
     first.externalImagesBlocked === second.externalImagesBlocked &&
-    first.locale === second.locale
+    first.locale === second.locale &&
+    first.syncDeleteToRemote === second.syncDeleteToRemote
   )
 }

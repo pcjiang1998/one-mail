@@ -1,8 +1,6 @@
 import * as React from 'react'
 import { Loader2, Trash2 } from 'lucide-react'
 
-import type { Message } from '@renderer/components/mail/types'
-import { getDisplaySubject } from '@renderer/components/mail/mail-display'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -16,33 +14,22 @@ import {
 } from '@renderer/components/ui/alert-dialog'
 import { useI18n } from '@renderer/lib/i18n'
 
-type DeleteMessageDialogProps = {
-  messages: Message[]
+type DeleteDraftDialogProps = {
   open: boolean
   pending?: boolean
+  subject?: string
   onOpenChange: (open: boolean) => void
   onConfirm: () => void
 }
 
-export function DeleteMessageDialog({
-  messages,
+export function DeleteDraftDialog({
   open,
   pending = false,
+  subject,
   onOpenChange,
   onConfirm
-}: DeleteMessageDialogProps): React.JSX.Element {
+}: DeleteDraftDialogProps): React.JSX.Element {
   const { t } = useI18n()
-  const count = messages.length
-  const firstMessage = messages[0]
-  const subject = firstMessage
-    ? getDisplaySubject(firstMessage, t)
-    : t('mail.delete.subjectFallback')
-  const meta =
-    count === 1
-      ? [firstMessage?.from, firstMessage?.dateLabel || firstMessage?.time]
-          .filter(Boolean)
-          .join(' · ')
-      : t('mail.delete.remoteMeta')
 
   return (
     <AlertDialog
@@ -51,8 +38,8 @@ export function DeleteMessageDialog({
         if (!pending) onOpenChange(nextOpen)
       }}
     >
-      <AlertDialogContent size="sm" className="sm:max-w-[360px]">
-        <AlertDialogHeader className="gap-2">
+      <AlertDialogContent size="sm">
+        <AlertDialogHeader>
           <AlertDialogMedia className="bg-destructive/10 text-destructive ring-1 ring-destructive/20">
             {pending ? (
               <Loader2 className="animate-spin" aria-hidden="true" />
@@ -60,22 +47,19 @@ export function DeleteMessageDialog({
               <Trash2 aria-hidden="true" />
             )}
           </AlertDialogMedia>
-          <AlertDialogTitle className="font-semibold">{t('mail.delete.title')}</AlertDialogTitle>
-          <AlertDialogDescription className="leading-5">
-            {t('mail.delete.description')}
-          </AlertDialogDescription>
+          <AlertDialogTitle>{t('mail.draft.deleteTitle')}</AlertDialogTitle>
+          <AlertDialogDescription>{t('mail.draft.deleteDescription')}</AlertDialogDescription>
         </AlertDialogHeader>
-        <div className="min-w-0 rounded-lg border bg-muted/40 px-3 py-2.5 text-left">
-          <p className="truncate text-sm font-medium text-foreground">
-            {count === 1 ? subject : t('mail.delete.summaryCount', { count })}
+        {subject ? (
+          <p className="truncate rounded-md border bg-muted/40 px-3 py-2 text-sm font-medium">
+            {subject}
           </p>
-          <p className="mt-1 truncate text-xs text-muted-foreground">{meta}</p>
-        </div>
-        <AlertDialogFooter className="bg-background">
+        ) : null}
+        <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>{t('common.cancel')}</AlertDialogCancel>
           <AlertDialogAction
             variant="destructive"
-            disabled={pending || count === 0}
+            disabled={pending}
             onClick={(event) => {
               event.preventDefault()
               onConfirm()

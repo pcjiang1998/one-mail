@@ -108,26 +108,40 @@ export class SimpleImapSession {
     const internalDate = formatAppendInternalDate(options.internalDate)
     const literal = Buffer.from(rawMessage, 'utf8')
     const tag = `${this.tagPrefix}${String(this.tagIndex++).padStart(4, '0')}`
-    const command = ['APPEND', quoteAtom(mailboxPath), flags, internalDate, `{${literal.byteLength}}`]
+    const command = [
+      'APPEND',
+      quoteAtom(mailboxPath),
+      flags,
+      internalDate,
+      `{${literal.byteLength}}`
+    ]
       .filter(Boolean)
       .join(' ')
 
-    await this.literalCommand(
-      tag,
-      command,
-      literal,
-      BODY_FETCH_TIMEOUT_MS
-    )
+    await this.literalCommand(tag, command, literal, BODY_FETCH_TIMEOUT_MS)
   }
 
-  async uidMove(uid: number, destinationMailbox: string): Promise<void> {
+  async uidMove(uid: number, destinationMailbox: string): Promise<number | undefined> {
     assertValidUid(uid)
-    await this.command(`UID MOVE ${uid} ${quoteAtom(destinationMailbox)}`)
+    const response = await this.command(`UID MOVE ${uid} ${quoteAtom(destinationMailbox)}`)
+    return parseCopyUidDestination(response)
   }
 
-  async uidCopy(uid: number, destinationMailbox: string): Promise<void> {
+  async uidCopy(uid: number, destinationMailbox: string): Promise<number | undefined> {
     assertValidUid(uid)
-    await this.command(`UID COPY ${uid} ${quoteAtom(destinationMailbox)}`)
+    const response = await this.command(`UID COPY ${uid} ${quoteAtom(destinationMailbox)}`)
+    return parseCopyUidDestination(response)
+  }
+
+  async searchByMessageId(messageId: string): Promise<number[]> {
+    const response = await this.command(`UID SEARCH HEADER Message-ID ${quoteAtom(messageId)}`)
+    const match = response.match(/^\* SEARCH(?:\s+(.+))?$/im)
+    if (!match?.[1]) return []
+    return match[1]
+      .trim()
+      .split(/\s+/)
+      .map(Number)
+      .filter((uid) => Number.isInteger(uid) && uid > 0)
   }
 
   async setSeenFlag(uid: number, isRead: boolean): Promise<void> {
@@ -236,6 +250,14 @@ function extractRawMessageLiteral(response: string): string {
   return sliceUtf8Literal(response, match.index + match[0].length, byteLength)
 }
 
+function parseCopyUidDestination(response: string): number | undefined {
+  const match = /\[COPYUID\s+\d+\s+\S+\s+([^\]\s]+)\]/i.exec(response)
+  const firstDestinationUid = Number(match?.[1]?.split(/[,:]/, 1)[0])
+  return Number.isInteger(firstDestinationUid) && firstDestinationUid > 0
+    ? firstDestinationUid
+    : undefined
+}
+
 function sliceUtf8Literal(value: string, start: number, byteLength: number): string {
   let end = start
   let remainingBytes = byteLength
@@ -295,9 +317,20 @@ function formatAppendInternalDate(value?: Date | string): string {
   if (Number.isNaN(date.getTime())) return ''
 
   const day = String(date.getUTCDate()).padStart(2, '0')
-  const month = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][
-    date.getUTCMonth()
-  ]
+  const month = [
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec'
+  ][date.getUTCMonth()]
   const year = date.getUTCFullYear()
   const hours = String(date.getUTCHours()).padStart(2, '0')
   const minutes = String(date.getUTCMinutes()).padStart(2, '0')

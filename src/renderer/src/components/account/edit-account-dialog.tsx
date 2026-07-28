@@ -21,7 +21,12 @@ import {
 import { Switch } from '@renderer/components/ui/switch'
 import { discoverAccountFolders } from '@renderer/lib/api'
 import { useI18n, type TranslationKey } from '@renderer/lib/i18n'
-import type { AccountMailFolder, AccountUpdateInput, SmtpSecurity } from '../../../../shared/types'
+import type {
+  AccountMailFolder,
+  AccountUpdateInput,
+  RemoteDeletePolicy,
+  SmtpSecurity
+} from '../../../../shared/types'
 import { AccountFormField } from './account-form-field'
 
 type EditAccountValues = {
@@ -31,6 +36,7 @@ type EditAccountValues = {
   smtpHost?: string
   smtpPort: number
   smtpSecurity: SmtpSecurity
+  remoteDeletePolicy: RemoteDeletePolicy
 }
 
 type EditAccountDialogProps = {
@@ -131,6 +137,7 @@ export function EditAccountDialog({
         smtpHost: isCustomAccount && values.smtpEnabled ? values.smtpHost?.trim() : undefined,
         smtpPort: isCustomAccount && values.smtpEnabled ? values.smtpPort : undefined,
         smtpSecurity: isCustomAccount && values.smtpEnabled ? values.smtpSecurity : undefined,
+        remoteDeletePolicy: values.remoteDeletePolicy,
         selectedFolderPaths: folders ? Array.from(selectedFolderPaths) : undefined
       })
     } catch (submitError) {
@@ -303,6 +310,33 @@ export function EditAccountDialog({
         ) : null}
 
         <section className="flex flex-col gap-2.5 border-t pt-4">
+          <AccountFormField
+            id="edit-remote-delete-policy"
+            label={t('account.form.remoteDeletePolicy')}
+          >
+            <Controller
+              control={form.control}
+              name="remoteDeletePolicy"
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger id="edit-remote-delete-policy" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="inherit">{t('settings.mailOperations.inherit')}</SelectItem>
+                    <SelectItem value="enabled">{t('common.yes')}</SelectItem>
+                    <SelectItem value="disabled">{t('common.no')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            />
+          </AccountFormField>
+          <p className="text-xs text-muted-foreground">
+            {t('settings.mailOperations.accountDescription')}
+          </p>
+        </section>
+
+        <section className="flex flex-col gap-2.5 border-t pt-4">
           <div className="flex items-center justify-between gap-3">
             <div>
               <h3 className="text-sm font-medium">{t('account.folders.title')}</h3>
@@ -366,6 +400,7 @@ function createEditAccountSchema(
       accountLabel: z.string().trim().max(80, t('account.form.labelMax')).optional(),
       password: z.string().trim().optional(),
       smtpEnabled: z.boolean(),
+      remoteDeletePolicy: z.enum(['inherit', 'enabled', 'disabled']),
       smtpHost: z.string().trim().optional(),
       smtpPort: z
         .number(t('account.form.portRequired'))
@@ -390,6 +425,7 @@ function getDefaultValues(account: Account): EditAccountValues {
     accountLabel: getInitialLabel(account),
     password: '',
     smtpEnabled: account.smtpEnabled ?? false,
+    remoteDeletePolicy: account.remoteDeletePolicy ?? 'inherit',
     smtpHost: account.smtpHost ?? '',
     smtpPort: account.smtpPort ?? 465,
     smtpSecurity: account.smtpSecurity ?? 'ssl_tls'
