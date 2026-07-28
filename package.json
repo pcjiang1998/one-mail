@@ -30,9 +30,15 @@
     "build": "pnpm run typecheck && electron-vite build",
     "postinstall": "install-electron && electron-builder install-app-deps",
     "build:unpack": "pnpm run build && electron-builder --dir",
-    "build:win": "pnpm run build && node scripts/build-win.mjs",
-    "build:mac": "pnpm run build && electron-builder --mac",
-    "build:linux": "electron-vite build && electron-builder --linux"
+    "build:win": "pnpm run build && electron-builder --win --x64 --arm64",
+    "build:win-x64": "pnpm run build && electron-builder --win --x64",
+    "build:win-arm64": "pnpm run build && electron-builder --win --arm64",
+    "build:mac": "pnpm run build && electron-builder --mac --x64 --arm64",
+    "build:mac-x64": "pnpm run build && electron-builder --mac --x64",
+    "build:mac-arm64": "pnpm run build && electron-builder --mac --arm64",
+    "build:linux": "pnpm run build && electron-builder --linux AppImage deb --x64 --arm64",
+    "build:linux-x64": "pnpm run build && electron-builder --linux AppImage deb --x64",
+    "build:linux-arm64": "pnpm run build && electron-builder --linux AppImage deb --arm64"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

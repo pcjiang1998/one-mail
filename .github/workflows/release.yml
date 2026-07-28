@@ -71,20 +71,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build application
-        run: pnpm run build
-
-      - name: Package Windows
+      - name: Build Windows x64 and ARM64
         if: runner.os == 'Windows'
-        run: node scripts/build-win.mjs
+        run: pnpm build:win
 
-      - name: Package macOS
+      - name: Build macOS x64 and ARM64
         if: runner.os == 'macOS'
-        run: pnpm exec electron-builder --mac --x64 --arm64
+        run: pnpm build:mac
 
-      - name: Package Linux
+      - name: Build Linux x64 and ARM64
         if: runner.os == 'Linux'
-        run: pnpm exec electron-builder --linux AppImage deb
+        run: pnpm build:linux
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
@@ -98,8 +95,6 @@ jobs:
             dist/*.zip
             dist/*.AppImage
             dist/*.deb
-            dist/latest.yml
-            dist/latest-mac.yml
-            dist/latest-linux.yml
+            dist/latest*.yml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
