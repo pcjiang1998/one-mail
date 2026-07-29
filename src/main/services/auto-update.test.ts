@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   checkForUpdates: vi.fn(async () => null),
   on: vi.fn(),
   quitAndInstall: vi.fn(),
+  autoUpdaterError: undefined as Error | undefined,
   fetch: vi.fn(async () => ({
     ok: true,
     json: async () => ({ tag_name: 'v1.0.0' })
@@ -26,10 +27,13 @@ vi.mock('@electron-toolkit/utils', () => ({
 
 vi.mock('electron-updater', () => ({
   default: {
-    autoUpdater: {
-      checkForUpdates: mocks.checkForUpdates,
-      on: mocks.on,
-      quitAndInstall: mocks.quitAndInstall
+    get autoUpdater() {
+      if (mocks.autoUpdaterError) throw mocks.autoUpdaterError
+      return {
+        checkForUpdates: mocks.checkForUpdates,
+        on: mocks.on,
+        quitAndInstall: mocks.quitAndInstall
+      }
     }
   }
 }))
@@ -43,6 +47,7 @@ describe('automatic update scheduling', () => {
     vi.useFakeTimers()
     mocks.checkForUpdates.mockClear()
     mocks.fetch.mockClear()
+    mocks.autoUpdaterError = undefined
     vi.stubGlobal('fetch', mocks.fetch)
   })
 
@@ -58,6 +63,16 @@ describe('automatic update scheduling', () => {
 
     expect(mocks.checkForUpdates).not.toHaveBeenCalled()
     expect(mocks.fetch).not.toHaveBeenCalled()
+  })
+
+  it('keeps the app running when the auto-updater rejects the app version', async () => {
+    mocks.autoUpdaterError = new Error('App version is not a valid semver version')
+
+    expect(() => startAutoUpdateChecks('daily')).not.toThrow()
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(mocks.checkForUpdates).not.toHaveBeenCalled()
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
   })
 
   it('checks immediately and then once per day in daily mode', async () => {

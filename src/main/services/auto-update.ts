@@ -32,9 +32,14 @@ type GitHubLatestRelease = {
   html_url?: string
 }
 
-function getAutoUpdater(): AppUpdater {
-  const { autoUpdater } = electronUpdater
-  return autoUpdater
+function getAutoUpdater(): AppUpdater | null {
+  try {
+    const { autoUpdater } = electronUpdater
+    return autoUpdater
+  } catch (error) {
+    logUpdateError(error)
+    return null
+  }
 }
 
 function shouldCheckForUpdates(): boolean {
@@ -113,6 +118,14 @@ export async function checkForAppUpdates(): Promise<AppUpdateCheckResult> {
   }
 
   const autoUpdater = getAutoUpdater()
+  if (!autoUpdater) {
+    const status = getAppUpdateStatus()
+    return {
+      status: 'error',
+      currentVersion,
+      message: status.message
+    }
+  }
   installAutoUpdaterErrorHandler(autoUpdater)
 
   try {
@@ -164,7 +177,9 @@ export function installDownloadedAppUpdate(): boolean {
     progress: status.progress
   })
 
-  getAutoUpdater().quitAndInstall()
+  const autoUpdater = getAutoUpdater()
+  if (!autoUpdater) return false
+  autoUpdater.quitAndInstall()
   return true
 }
 
