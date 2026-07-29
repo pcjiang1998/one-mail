@@ -5,13 +5,10 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import appIcon from '../../resources/icon.png?asset'
 import windowsIcon from '../../resources/icon.ico?asset'
 import { closeDatabase, initializeDatabase } from './db/connection'
+import { getSettings } from './db/repositories/settings.repository'
 import { registerIpcHandlers } from './ipc'
 import { installRuntimeErrorGuards } from './runtime-errors'
-import {
-  checkGitHubReleaseForUpdates,
-  startAutoUpdateChecks,
-  stopAutoUpdateChecks
-} from './services/auto-update'
+import { startAutoUpdateChecks, stopAutoUpdateChecks } from './services/auto-update'
 import {
   requestForegroundMailboxSync,
   requestManualMailboxSync,
@@ -93,7 +90,6 @@ function createWindow(initialRoute = '/'): BrowserWindow {
 
   nextWindow.on('show', () => {
     requestForegroundMailboxSync('show')
-    checkGitHubReleaseForUpdates()
   })
 
   nextWindow.on('restore', () => {
@@ -160,7 +156,7 @@ app.whenReady().then(() => {
   initializeDatabase()
   registerIpcHandlers()
   startMailboxWatchers()
-  startAutoUpdateChecks()
+  startAutoUpdateChecks(getSettings().updateCheckFrequency)
   initializeTray(process.platform === 'win32' ? windowsIcon : appIcon, {
     showWindow: () => showMainWindow(),
     syncNow: () => requestManualMailboxSync()

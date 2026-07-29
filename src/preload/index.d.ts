@@ -4,7 +4,9 @@ import type { OneMailApi } from '../shared/types'
 export type {
   AccountCreatedEvent,
   AccountCreateInput,
+  AccountBulkRemoveResult,
   AccountMailFolder,
+  AccountOrderInput,
   AccountStatus,
   AccountMailboxStats,
   AccountSyncRunResult,
@@ -63,7 +65,13 @@ export type {
   SmtpSecurity,
   SyncMode,
   SyncStatus,
-  SystemInfo
+  SystemInfo,
+  TranslationLanguage,
+  TranslationProvider,
+  TranslationProviderConfig,
+  TranslationRequest,
+  TranslationResult,
+  TranslationSettings
 } from '../shared/types'
 
 declare global {

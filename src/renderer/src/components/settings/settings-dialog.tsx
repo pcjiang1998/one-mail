@@ -11,7 +11,9 @@ import {
   KeyRound,
   Languages,
   LoaderCircle,
+  Mails,
   Network,
+  Palette,
   Settings2,
   Power,
   RefreshCcw,
@@ -26,8 +28,11 @@ import { z } from 'zod'
 
 import {
   exportSqlBackup,
+  checkForAppUpdates,
+  installAppUpdate,
   loadBackupSyncSettings,
   openExternalUrl,
+  revealDatabaseInFileManager,
   revealPathInFileManager,
   saveBackupSyncSettings,
   testBackupSyncSettings,
@@ -45,6 +50,8 @@ import {
   SignatureSettings,
   SyncSettings
 } from '@renderer/components/settings/settings-advanced-sections'
+import { AccountManagementSettings } from '@renderer/components/settings/account-management-settings'
+import { TranslationSettings } from '@renderer/components/settings/translation-settings'
 import { ResponsiveDialog } from '@renderer/components/responsive-dialog'
 import { Button } from '@renderer/components/ui/button'
 import {
@@ -68,6 +75,7 @@ import { Switch } from '@renderer/components/ui/switch'
 import { Alert, AlertDescription, AlertTitle } from '@renderer/components/ui/alert'
 import type {
   AppSettings,
+  AppColorTheme,
   AppUpdateStatus,
   AccountUpdateInput,
   BackupImportResult,
@@ -76,12 +84,14 @@ import type {
   BackupSyncSettings,
   SettingsUpdateInput,
   SystemInfo,
+  UpdateCheckFrequency,
   RemoteDeletePolicy
 } from '../../../../shared/types'
 import { cn } from '@renderer/lib/utils'
 import { useI18n, type TranslationKey } from '@renderer/lib/i18n'
 import { ONEMAIL_HOMEPAGE_URL, hasAvailableUpdate } from '@renderer/lib/update-status'
 import type { Account } from '@renderer/components/mail/types'
+import { APP_COLOR_THEMES, APP_COLOR_THEME_SWATCHES, applyAppTheme } from '@renderer/lib/theme'
 
 type SettingsDialogProps = {
   open: boolean
@@ -95,14 +105,18 @@ type SettingsDialogProps = {
   accounts: Account[]
   onUpdateAccount: (input: AccountUpdateInput) => Promise<void>
   onRefreshAccounts: () => Promise<void>
+  onRemoveAccounts: (accountIds: number[]) => Promise<void>
+  onReorderAccounts: (accountIds: number[]) => Promise<void>
 }
 
 type SettingsSection =
+  | 'accounts'
   | 'general'
   | 'mailOperations'
   | 'signatures'
   | 'network'
   | 'sync'
+  | 'translation'
   | 'backup'
   | 'about'
 type BackupPending =
@@ -126,6 +140,8 @@ type SettingsFormValues = {
   openAtLogin: boolean
   externalImagesBlocked: boolean
   locale: 'zh-CN' | 'en-US'
+  theme: AppColorTheme
+  updateCheckFrequency: UpdateCheckFrequency
   syncDeleteToRemote: boolean
 }
 
@@ -134,6 +150,11 @@ const sections: Array<{
   labelKey: TranslationKey
   icon: React.ComponentType<React.SVGProps<SVGSVGElement>>
 }> = [
+  {
+    value: 'accounts',
+    labelKey: 'settings.accounts',
+    icon: Mails
+  },
   {
     value: 'mailOperations',
     labelKey: 'settings.mailOperations',
@@ -160,6 +181,11 @@ const sections: Array<{
     icon: Clock3
   },
   {
+    value: 'translation',
+    labelKey: 'settings.translation',
+    icon: Languages
+  },
+  {
     value: 'backup',
     labelKey: 'settings.backup',
     icon: DatabaseBackup
@@ -176,17 +202,19 @@ export function SettingsDialog({
   settings,
   systemInfo,
   updateStatus,
-  initialSection = 'general',
+  initialSection = 'accounts',
   onOpenChange,
   onSubmit,
   onImported,
   accounts,
   onUpdateAccount,
-  onRefreshAccounts
+  onRefreshAccounts,
+  onRemoveAccounts,
+  onReorderAccounts
 }: SettingsDialogProps): React.JSX.Element {
   const { t } = useI18n()
   const settingsSchema = React.useMemo(() => createSettingsSchema(t), [t])
-  const [section, setSection] = React.useState<SettingsSection>('general')
+  const [section, setSection] = React.useState<SettingsSection>('accounts')
   const [pending, setPending] = React.useState(false)
   const [backupPending, setBackupPending] = React.useState<BackupPending>(null)
   const [backupImportDialogOpen, setBackupImportDialogOpen] = React.useState(false)
@@ -237,6 +265,8 @@ export function SettingsDialog({
             openAtLogin: currentValues.openAtLogin,
             externalImagesBlocked: currentValues.externalImagesBlocked,
             locale: currentValues.locale,
+            theme: currentValues.theme,
+            updateCheckFrequency: currentValues.updateCheckFrequency,
             syncDeleteToRemote: currentValues.syncDeleteToRemote
           })
           lastSavedValuesRef.current = currentValues
@@ -347,7 +377,7 @@ export function SettingsDialog({
       setError(null)
       setBackupError(null)
       setBackupMessage(null)
-      setSection('general')
+      setSection('accounts')
     }
     onOpenChange(nextOpen)
   }
@@ -486,8 +516,14 @@ export function SettingsDialog({
           </nav>
 
           <div className="h-full min-h-0 overflow-auto">
-            {section === 'general' ? (
-              <GeneralSettingsForm form={form} error={error} />
+            {section === 'accounts' ? (
+              <AccountManagementSettings
+                accounts={accounts}
+                onRemoveAccounts={onRemoveAccounts}
+                onReorderAccounts={onReorderAccounts}
+              />
+            ) : section === 'general' ? (
+              <GeneralSettingsForm form={form} error={error} systemInfo={systemInfo} />
             ) : section === 'mailOperations' ? (
               <MailOperationsSettings
                 form={form}
@@ -516,6 +552,8 @@ export function SettingsDialog({
                 onSubmit={onSubmit}
                 onUpdateAccount={onUpdateAccount}
               />
+            ) : section === 'translation' ? (
+              <TranslationSettings />
             ) : section === 'backup' ? (
               <BackupSettings
                 key={getBackupSyncSettingsKey(backupSyncSettings)}
@@ -531,7 +569,12 @@ export function SettingsDialog({
                 onDownloadSync={handleDownloadBackupSync}
               />
             ) : (
-              <AboutSettings systemInfo={systemInfo} updateStatus={updateStatus} />
+              <AboutSettings
+                form={form}
+                error={error}
+                systemInfo={systemInfo}
+                updateStatus={updateStatus}
+              />
             )}
           </div>
         </div>
@@ -642,10 +685,12 @@ function MailOperationsSettings({
 
 function GeneralSettingsForm({
   form,
-  error
+  error,
+  systemInfo
 }: {
   form: ReturnType<typeof useForm<SettingsFormValues>>
   error: string | null
+  systemInfo: SystemInfo | null
 }): React.JSX.Element {
   const { t } = useI18n()
 
@@ -667,6 +712,48 @@ function GeneralSettingsForm({
                   checked={field.value}
                   onCheckedChange={field.onChange}
                 />
+              }
+            />
+          )}
+        />
+
+        <Controller
+          control={form.control}
+          name="theme"
+          render={({ field }) => (
+            <SettingRow
+              icon={Palette}
+              title={t('settings.theme.title')}
+              description={t('settings.theme.description')}
+              control={
+                <Select
+                  value={field.value}
+                  onValueChange={(value) => {
+                    const theme = value as AppColorTheme
+                    field.onChange(theme)
+                    applyAppTheme(theme)
+                  }}
+                >
+                  <SelectTrigger id="theme" size="sm" className="w-44">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {APP_COLOR_THEMES.map((theme) => (
+                        <SelectItem key={theme} value={theme}>
+                          <span className="flex items-center gap-2">
+                            <span
+                              className="size-3 shrink-0 rounded-sm border border-black/15 dark:border-white/20"
+                              style={{ backgroundColor: APP_COLOR_THEME_SWATCHES[theme] }}
+                              aria-hidden="true"
+                            />
+                            {t(`settings.theme.${theme}` as TranslationKey)}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
               }
             />
           )}
@@ -743,6 +830,27 @@ function GeneralSettingsForm({
               invalid={Boolean(form.formState.errors.locale)}
             />
           )}
+        />
+
+        <SettingRow
+          icon={FolderOpen}
+          title={t('settings.database.title')}
+          description={
+            <span className="break-all">
+              {systemInfo?.databasePath ?? t('settings.database.loading')}
+            </span>
+          }
+          control={
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!systemInfo?.databasePath}
+              onClick={() => void revealDatabaseInFileManager()}
+            >
+              <FolderOpen data-icon="inline-start" />
+              {t('settings.database.openFolder')}
+            </Button>
+          }
         />
 
         {error ? <FieldError>{error}</FieldError> : null}
@@ -897,15 +1005,26 @@ function getBackupActionErrorMessage(error: unknown, t: (key: TranslationKey) =>
 }
 
 function AboutSettings({
+  form,
+  error,
   systemInfo,
   updateStatus
 }: {
+  form: ReturnType<typeof useForm<SettingsFormValues>>
+  error: string | null
   systemInfo: SystemInfo | null
   updateStatus: AppUpdateStatus | null
 }): React.JSX.Element {
   const { t } = useI18n()
+  const [updatePending, setUpdatePending] = React.useState<'check' | 'install' | null>(null)
+  const [updateError, setUpdateError] = React.useState<string | null>(null)
   const version = systemInfo?.appVersion ? `v${systemInfo.appVersion}` : t('common.loading')
   const hasUpdate = hasAvailableUpdate(updateStatus)
+  const updateBusy =
+    updatePending !== null ||
+    updateStatus?.state === 'checking' ||
+    updateStatus?.state === 'downloading' ||
+    updateStatus?.state === 'installing'
   const versionTitle =
     hasUpdate && updateStatus?.latestVersion
       ? t('settings.about.updateVersionTooltip', { version: updateStatus.latestVersion })
@@ -948,6 +1067,98 @@ function AboutSettings({
             </Button>
           }
         />
+        <Controller
+          control={form.control}
+          name="updateCheckFrequency"
+          render={({ field }) => (
+            <SettingRow
+              icon={Clock3}
+              title={t('settings.about.updateFrequencyTitle')}
+              description={t('settings.about.updateFrequencyDescription')}
+              control={
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger id="update-check-frequency" size="sm" className="w-40">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="manual">
+                      {t('settings.about.updateFrequencyManual')}
+                    </SelectItem>
+                    <SelectItem value="daily">
+                      {t('settings.about.updateFrequencyDaily')}
+                    </SelectItem>
+                    <SelectItem value="weekly">
+                      {t('settings.about.updateFrequencyWeekly')}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              }
+            />
+          )}
+        />
+        <SettingRow
+          icon={RefreshCcw}
+          title={t('settings.about.updateTitle')}
+          description={formatAboutUpdateStatus(updateStatus, t)}
+          control={
+            updateStatus?.state === 'downloaded' ? (
+              <Button
+                size="sm"
+                disabled={updateBusy}
+                onClick={() => {
+                  setUpdatePending('install')
+                  setUpdateError(null)
+                  void installAppUpdate()
+                    .catch((installError) => {
+                      setUpdateError(
+                        installError instanceof Error
+                          ? installError.message
+                          : t('settings.about.updateError')
+                      )
+                    })
+                    .finally(() => setUpdatePending(null))
+                }}
+              >
+                {updatePending === 'install' ? (
+                  <LoaderCircle data-icon="inline-start" className="animate-spin" />
+                ) : (
+                  <RefreshCcw data-icon="inline-start" />
+                )}
+                {t('settings.about.updateRestart')}
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={updateBusy}
+                onClick={() => {
+                  setUpdatePending('check')
+                  setUpdateError(null)
+                  void checkForAppUpdates()
+                    .catch((checkError) => {
+                      setUpdateError(
+                        checkError instanceof Error
+                          ? checkError.message
+                          : t('settings.about.updateError')
+                      )
+                    })
+                    .finally(() => setUpdatePending(null))
+                }}
+              >
+                {updatePending === 'check' || updateStatus?.state === 'checking' ? (
+                  <LoaderCircle data-icon="inline-start" className="animate-spin" />
+                ) : (
+                  <RefreshCcw data-icon="inline-start" />
+                )}
+                {updatePending === 'check' || updateStatus?.state === 'checking'
+                  ? t('settings.about.updateChecking')
+                  : t('settings.about.updateCheck')}
+              </Button>
+            )
+          }
+        />
+        {updateError ? <FieldError>{updateError}</FieldError> : null}
+        {error ? <FieldError>{error}</FieldError> : null}
         <div className="border-t pt-3 text-xs leading-6 text-muted-foreground">
           <p>{t('settings.about.basedOn')}</p>
           <p>
@@ -985,6 +1196,30 @@ function AboutSettings({
       </FieldGroup>
     </div>
   )
+}
+
+function formatAboutUpdateStatus(
+  status: AppUpdateStatus | null,
+  t: (key: TranslationKey, values?: Record<string, string | number>) => string
+): string {
+  if (!status || status.state === 'idle') return t('settings.about.updateIdle')
+  if (status.state === 'checking') return t('settings.about.updateChecking')
+  if (status.state === 'available') {
+    return status.latestVersion
+      ? t('settings.about.updateAvailableVersion', { version: status.latestVersion })
+      : t('settings.about.updateAvailable')
+  }
+  if (status.state === 'downloading') {
+    return t('settings.about.updateDownloadingPercent', {
+      percent: Math.round(status.progress?.percent ?? 0)
+    })
+  }
+  if (status.state === 'downloaded') return t('settings.about.updateDownloaded')
+  if (status.state === 'installing') return t('settings.about.updateInstalling')
+  if (status.state === 'not_available') return t('settings.about.updateNotAvailable')
+  if (status.state === 'unsupported') return t('settings.about.updateUnsupported')
+  if (status.state === 'cancelled') return t('settings.about.updateCancelled')
+  return t('settings.about.updateFailed')
 }
 
 function BackupMessageView({ message }: { message: BackupMessage }): React.JSX.Element {
@@ -1111,6 +1346,8 @@ function createSettingsSchema(t: (key: TranslationKey) => string) {
     openAtLogin: z.boolean(),
     externalImagesBlocked: z.boolean(),
     locale: z.enum(['zh-CN', 'en-US']),
+    theme: z.enum(APP_COLOR_THEMES),
+    updateCheckFrequency: z.enum(['manual', 'daily', 'weekly']),
     syncDeleteToRemote: z.boolean()
   })
 }
@@ -1122,6 +1359,8 @@ function toFormValues(settings: AppSettings | null): SettingsFormValues {
     openAtLogin: settings?.openAtLogin === true,
     externalImagesBlocked: settings?.externalImagesBlocked !== false,
     locale: settings?.locale === 'en-US' ? 'en-US' : 'zh-CN',
+    theme: settings?.theme ?? 'light',
+    updateCheckFrequency: settings?.updateCheckFrequency ?? 'daily',
     syncDeleteToRemote: settings?.syncDeleteToRemote !== false
   }
 }
@@ -1133,6 +1372,8 @@ function areSettingsEqual(first: SettingsFormValues, second: SettingsFormValues)
     first.openAtLogin === second.openAtLogin &&
     first.externalImagesBlocked === second.externalImagesBlocked &&
     first.locale === second.locale &&
+    first.theme === second.theme &&
+    first.updateCheckFrequency === second.updateCheckFrequency &&
     first.syncDeleteToRemote === second.syncDeleteToRemote
   )
 }

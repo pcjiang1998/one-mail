@@ -8,6 +8,7 @@ import { registerSettingsIpc } from './settings'
 import { registerSyncIpc } from './sync'
 import { registerSystemIpc } from './system'
 import { registerUpdateIpc } from './updates'
+import { registerTranslationIpc } from './translations'
 
 let registered = false
 
@@ -26,6 +27,7 @@ export function registerIpcHandlers(): void {
   registerSettingsIpc()
   registerSystemIpc()
   registerUpdateIpc()
+  registerTranslationIpc()
 
   registered = true
 }

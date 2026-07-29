@@ -270,21 +270,21 @@ export function useMailboxMessages({
   )
 
   const loadMessageBodyForReader = React.useCallback(
-    (message: Message): void => {
-      if (!beginLoadingBody(message)) return
+    async (message: Message): Promise<Message | undefined> => {
+      if (!beginLoadingBody(message)) return undefined
       setLoadingBodyMessageId(message.id)
 
-      void loadMessageBody(message)
-        .then((detail) => {
-          replaceMessage(message.id, detail, setMessages)
-        })
-        .catch((loadError) => {
-          setError(getErrorMessage(loadError, t('mailbox.loadBodyError')))
-        })
-        .finally(() => {
-          loadingBodyMessageIdsRef.current.delete(message.id)
-          setLoadingBodyMessageId((current) => (current === message.id ? null : current))
-        })
+      try {
+        const detail = await loadMessageBody(message)
+        replaceMessage(message.id, detail, setMessages)
+        return detail
+      } catch (loadError) {
+        setError(getErrorMessage(loadError, t('mailbox.loadBodyError')))
+        return undefined
+      } finally {
+        loadingBodyMessageIdsRef.current.delete(message.id)
+        setLoadingBodyMessageId((current) => (current === message.id ? null : current))
+      }
     },
     [beginLoadingBody, setError, t]
   )

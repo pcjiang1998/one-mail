@@ -609,7 +609,7 @@ function getDefaultValues(account: Account): EditAccountValues {
     signatureMode: account.signatureMode ?? 'global',
     signatureId: account.signatureId,
     syncMode: account.syncMode ?? (account.receiveProtocol === 'pop3' ? 'fallback' : 'global'),
-    accountSyncIntervalMinutes: account.accountSyncIntervalMinutes ?? 15
+    accountSyncIntervalMinutes: account.accountSyncIntervalMinutes ?? 5
   }
 }
 

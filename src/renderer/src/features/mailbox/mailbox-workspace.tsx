@@ -36,7 +36,6 @@ import {
   deleteDraftMessage,
   deleteOutboxMessage,
   getAppUpdateStatus,
-  installAppUpdate,
   loadAccounts,
   loadInitialData,
   loadMessageDetail,
@@ -47,11 +46,11 @@ import {
   onAppUpdateStatus,
   onMailboxChanged,
   openAddAccountWindow,
-  openExternalUrl,
   reauthorizeAccount,
   removeAccount,
-  revealDatabaseInFileManager,
+  removeAccounts,
   retryOutboxMessage,
+  reorderAccounts,
   parseMailboxSelection,
   saveSettings,
   syncAllAccounts,
@@ -60,7 +59,7 @@ import {
   updateAccount
 } from '@renderer/lib/api'
 import { normalizeLocale, useI18n } from '@renderer/lib/i18n'
-import { ONEMAIL_HOMEPAGE_URL, hasAvailableUpdate } from '@renderer/lib/update-status'
+import { applyAppTheme } from '@renderer/lib/theme'
 import type { OutboxMessage } from '@renderer/lib/api'
 import { toast } from 'sonner'
 import { NoAccountsBody, StatusBar, TitleBar } from './mailbox-chrome'
@@ -119,9 +118,9 @@ export function MailboxWorkspace(): React.JSX.Element {
   const [backupImportSource, setBackupImportSource] =
     React.useState<BackupImportDialogSource>('sql')
   const [backupImportBusy, setBackupImportBusy] = React.useState(false)
-  const [settingsInitialSection, setSettingsInitialSection] = React.useState<'general' | 'about'>(
-    'general'
-  )
+  const [settingsInitialSection, setSettingsInitialSection] = React.useState<
+    'accounts' | 'general' | 'about'
+  >('accounts')
   const [dialogAccountId, setDialogAccountId] = React.useState<string | null>(null)
   const [warningAccountId, setWarningAccountId] = React.useState<string | null>(null)
   const [outboxOpen, setOutboxOpen] = React.useState(false)
@@ -274,6 +273,7 @@ export function MailboxWorkspace(): React.JSX.Element {
     setAccounts(data.accounts)
     setSettings(data.settings)
     setLocale(normalizeLocale(data.settings.locale))
+    applyAppTheme(data.settings.theme)
     setSystemInfo(data.systemInfo)
     setSelectedAccountId(data.selectedAccountId)
     setFilters([])
@@ -294,6 +294,7 @@ export function MailboxWorkspace(): React.JSX.Element {
         setAccounts(data.accounts)
         setSettings(data.settings)
         setLocale(normalizeLocale(data.settings.locale))
+        applyAppTheme(data.settings.theme)
         setSystemInfo(data.systemInfo)
         setSelectedAccountId(data.selectedAccountId)
         replaceMessages(data.messages, { selectFirst: true })
@@ -533,6 +534,16 @@ export function MailboxWorkspace(): React.JSX.Element {
     setDialogAccountId(null)
   }
 
+  async function handleRemoveManagedAccounts(accountIds: number[]): Promise<void> {
+    await removeAccounts(accountIds)
+    await reloadInitialData()
+  }
+
+  async function handleReorderManagedAccounts(accountIds: number[]): Promise<void> {
+    await reorderAccounts(accountIds)
+    await refreshAccounts()
+  }
+
   async function handleReauthorizeAccount(account: Account): Promise<void> {
     if (!account.accountId) return
 
@@ -629,6 +640,7 @@ export function MailboxWorkspace(): React.JSX.Element {
     const nextSettings = await saveSettings(input)
     setSettings(nextSettings)
     setLocale(normalizeLocale(nextSettings.locale))
+    applyAppTheme(nextSettings.theme)
   }
 
   function handleImportBackup(source: BackupImportDialogSource): void {
@@ -991,26 +1003,10 @@ export function MailboxWorkspace(): React.JSX.Element {
       )}
 
       <StatusBar
-        systemInfo={systemInfo}
         settings={settings}
         accountCount={realAccounts.length}
         messageCount={selectedAccount.messageCount ?? messages.length}
         syncNotice={syncNotice}
-        updateStatus={updateStatus}
-        onRevealDatabase={() => {
-          void revealDatabaseInFileManager()
-        }}
-        onOpenVersion={() => {
-          if (hasAvailableUpdate(updateStatus)) {
-            void openExternalUrl(ONEMAIL_HOMEPAGE_URL)
-            return
-          }
-          setSettingsInitialSection('about')
-          setDialogKind('settings')
-        }}
-        onInstallUpdate={() => {
-          void installAppUpdate()
-        }}
       />
 
       <EditAccountDialog
@@ -1065,6 +1061,8 @@ export function MailboxWorkspace(): React.JSX.Element {
         accounts={realAccounts}
         onUpdateAccount={handleUpdateAccountSettings}
         onRefreshAccounts={refreshAccounts}
+        onRemoveAccounts={handleRemoveManagedAccounts}
+        onReorderAccounts={handleReorderManagedAccounts}
         onImported={reloadInitialData}
       />
       <BackupImportDialog

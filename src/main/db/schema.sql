@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS onemail_mail_accounts (
   remote_delete_policy TEXT NOT NULL DEFAULT 'inherit' CHECK (
     remote_delete_policy IN ('inherit', 'enabled', 'disabled')
   ),
-  sync_interval_minutes INTEGER NOT NULL DEFAULT 15 CHECK (sync_interval_minutes >= 0),
+  sync_interval_minutes INTEGER NOT NULL DEFAULT 5 CHECK (sync_interval_minutes >= 0),
   sync_window_days INTEGER NOT NULL DEFAULT 90 CHECK (sync_window_days > 0),
   encrypted_password TEXT,
   credential_state TEXT NOT NULL DEFAULT 'pending' CHECK (

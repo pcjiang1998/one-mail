@@ -96,6 +96,14 @@ export type AccountUpdateInput = Partial<Omit<AccountCreateInput, 'email' | 'pas
   selectedFolderPaths?: string[]
 }
 
+export type AccountOrderInput = {
+  accountIds: number[]
+}
+
+export type AccountBulkRemoveResult = {
+  removedAccountIds: number[]
+}
+
 export type MailFolderRole =
   | 'inbox'
   | 'sent'
@@ -434,12 +442,26 @@ export type NotificationStatus = {
   desktopSupported: boolean
 }
 
+export type AppColorTheme =
+  | 'light'
+  | 'dark'
+  | 'blue-light'
+  | 'green-light'
+  | 'rose-light'
+  | 'blue-dark'
+  | 'green-dark'
+  | 'burgundy-dark'
+
+export type UpdateCheckFrequency = 'manual' | 'daily' | 'weekly'
+
 export type AppSettings = {
   syncIntervalMinutes: number
   syncWindowDays: number
   openAtLogin: boolean
   externalImagesBlocked: boolean
   locale: string
+  theme: AppColorTheme
+  updateCheckFrequency: UpdateCheckFrequency
   syncDeleteToRemote: boolean
   globalProxyMode: ProxyMode
   globalProxyUrl?: string
@@ -452,6 +474,64 @@ export type AppSettings = {
 }
 
 export type SettingsUpdateInput = Partial<AppSettings>
+
+export type TranslationProvider =
+  | 'aliyun'
+  | 'baidu'
+  | 'baidufield'
+  | 'caiyun'
+  | 'claude'
+  | 'cnki'
+  | 'deeplcustom'
+  | 'gemini'
+  | 'google'
+  | 'huoshan'
+  | 'huoshanweb'
+  | 'microsoft'
+  | 'deepl'
+  | 'libretranslate'
+  | 'deeplx'
+  | 'niutrans'
+  | 'openai'
+  | 'tencent'
+  | 'tencenttransmart'
+
+export type TranslationLanguage = 'zh-CN' | 'zh-TW' | 'en' | 'ja' | 'ko' | 'de' | 'fr' | 'es'
+
+export type OpenAiApiMode = 'responses' | 'chat-completions'
+
+export type TranslationProviderConfig = {
+  endpoint?: string
+  apiKey?: string
+  apiKeyConfigured?: boolean
+  model?: string
+  apiMode?: OpenAiApiMode
+  action?: string
+  scene?: string
+  dictionaryId?: string
+  memoryId?: string
+  termRepositoryIds?: string
+  sentenceRepositoryIds?: string
+}
+
+export type TranslationSettings = {
+  activeProvider: TranslationProvider
+  targetLanguage: TranslationLanguage
+  providers: Record<TranslationProvider, TranslationProviderConfig>
+}
+
+export type TranslationRequest = {
+  text?: string
+  segments?: string[]
+  targetLanguage?: TranslationLanguage
+}
+
+export type TranslationResult = {
+  provider: TranslationProvider
+  targetLanguage: TranslationLanguage
+  translatedText: string
+  translatedSegments?: string[]
+}
 
 export type MailSignature = {
   signatureId: number
@@ -605,6 +685,8 @@ export type OneMailApi = {
     reauthorize: (accountId: number) => Promise<MailAccount>
     disable: (accountId: number) => Promise<MailAccount>
     remove: (accountId: number) => Promise<boolean>
+    removeMany: (input: AccountOrderInput) => Promise<AccountBulkRemoveResult>
+    reorder: (input: AccountOrderInput) => Promise<MailAccount[]>
   }
   logos: {
     get: (domain: string) => Promise<string | null>
@@ -666,6 +748,11 @@ export type OneMailApi = {
     exportSql: () => Promise<string | null>
     importSql: (operationId?: string) => Promise<BackupImportResult>
     onBackupImportProgress: (callback: (progress: BackupImportProgress) => void) => () => void
+  }
+  translations: {
+    getSettings: () => Promise<TranslationSettings>
+    updateSettings: (input: TranslationSettings) => Promise<TranslationSettings>
+    translate: (input: TranslationRequest) => Promise<TranslationResult>
   }
   updates: {
     check: () => Promise<AppUpdateCheckResult>

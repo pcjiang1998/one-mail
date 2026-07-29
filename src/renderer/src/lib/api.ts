@@ -36,7 +36,10 @@ import type {
   SettingsUpdateInput,
   SyncMode,
   SyncStatus,
-  SystemInfo
+  SystemInfo,
+  TranslationRequest,
+  TranslationResult,
+  TranslationSettings
 } from '../../../shared/types'
 import { normalizeMailBodyText, normalizeMailDisplayText } from '../../../shared/mail-text'
 import { ATTACHMENT_METADATA_PENDING_SIZE } from '@renderer/components/mail/mail-display'
@@ -222,6 +225,15 @@ export async function removeAccount(accountId: number): Promise<boolean> {
   return window.api.accounts.remove(accountId)
 }
 
+export async function removeAccounts(accountIds: number[]): Promise<number[]> {
+  const result = await window.api.accounts.removeMany({ accountIds })
+  return result.removedAccountIds
+}
+
+export async function reorderAccounts(accountIds: number[]): Promise<void> {
+  await window.api.accounts.reorder({ accountIds })
+}
+
 export async function syncAccount(
   accountId: number,
   mode: SyncMode = 'refresh'
@@ -252,6 +264,20 @@ export function onMailboxChanged(callback: (event: MailboxChangedEvent) => void)
 
 export async function saveSettings(input: SettingsUpdateInput): Promise<AppSettings> {
   return window.api.settings.update(input)
+}
+
+export async function loadTranslationSettings(): Promise<TranslationSettings> {
+  return window.api.translations.getSettings()
+}
+
+export async function saveTranslationSettings(
+  input: TranslationSettings
+): Promise<TranslationSettings> {
+  return window.api.translations.updateSettings(input)
+}
+
+export async function translateMail(input: TranslationRequest): Promise<TranslationResult> {
+  return window.api.translations.translate(input)
 }
 
 export async function saveMailSignature(input: MailSignatureInput): Promise<MailSignature> {

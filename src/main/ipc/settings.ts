@@ -20,6 +20,7 @@ import {
   type BackupImportProgressReporter
 } from '../services/database-backup'
 import { refreshMailboxWatchers } from '../services/mailbox-watch'
+import { startAutoUpdateChecks } from '../services/auto-update'
 import type {
   BackupImportProgress,
   BackupSyncSettings,
@@ -30,8 +31,12 @@ import type {
 export function registerSettingsIpc(): void {
   ipcMain.handle('settings/get', () => getSettings())
   ipcMain.handle('settings/update', (_event, input: SettingsUpdateInput) => {
+    const previousFrequency = getSettings().updateCheckFrequency
     const settings = updateSettings(input)
     refreshMailboxWatchers()
+    if (settings.updateCheckFrequency !== previousFrequency) {
+      startAutoUpdateChecks(settings.updateCheckFrequency)
+    }
     return settings
   })
   ipcMain.handle('settings/saveSignature', (_event, input: MailSignatureInput) =>

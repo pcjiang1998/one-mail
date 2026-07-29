@@ -163,7 +163,7 @@ export function createAccount(input: AccountCreateInput): MailAccount {
   const signatureMode = input.signatureMode ?? 'global'
   const signatureId = resolveSignatureId(signatureMode, input.signatureId)
   const accountSyncMode = normalizeCreatedSyncMode(receiveProtocol, input.syncMode)
-  const syncIntervalMinutes = validateSyncInterval(input.accountSyncIntervalMinutes ?? 15)
+  const syncIntervalMinutes = validateSyncInterval(input.accountSyncIntervalMinutes ?? 5)
   const db = getDatabase()
 
   db.prepare(
@@ -264,6 +264,7 @@ export function createAccount(input: AccountCreateInput): MailAccount {
         account_sync_mode,
         sync_interval_minutes,
         remote_delete_policy,
+        sort_order,
         credential_state,
         status
       )
@@ -294,6 +295,7 @@ export function createAccount(input: AccountCreateInput): MailAccount {
         :accountSyncMode,
         :syncIntervalMinutes,
         :remoteDeletePolicy,
+        (SELECT COALESCE(MAX(sort_order), -1) + 1 FROM onemail_mail_accounts),
         'pending',
         'active'
       )
@@ -497,11 +499,61 @@ export function markAccountAuthError(accountId: number, message: string): void {
 }
 
 export function removeAccount(accountId: number): boolean {
-  const result = getDatabase()
-    .prepare('DELETE FROM onemail_mail_accounts WHERE account_id = :accountId')
-    .run({ accountId })
+  return removeAccounts([accountId]).length === 1
+}
 
-  return result.changes > 0
+export function removeAccounts(accountIds: number[]): number[] {
+  const normalizedIds = normalizeAccountIds(accountIds)
+  if (normalizedIds.length === 0) return []
+
+  const db = getDatabase()
+  const remove = db.prepare('DELETE FROM onemail_mail_accounts WHERE account_id = :accountId')
+  const removedIds: number[] = []
+
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    for (const accountId of normalizedIds) {
+      if (remove.run({ accountId }).changes > 0) removedIds.push(accountId)
+    }
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+
+  return removedIds
+}
+
+export function reorderAccounts(accountIds: number[]): MailAccount[] {
+  const normalizedIds = normalizeAccountIds(accountIds)
+  const currentIds = listAccounts().map((account) => account.accountId)
+  if (
+    normalizedIds.length !== currentIds.length ||
+    currentIds.some((accountId) => !normalizedIds.includes(accountId))
+  ) {
+    throw new Error('邮箱排序必须包含当前全部邮箱且不能重复。')
+  }
+
+  const db = getDatabase()
+  const update = db.prepare(
+    `UPDATE onemail_mail_accounts
+     SET sort_order = :sortOrder,
+         updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+     WHERE account_id = :accountId`
+  )
+
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    normalizedIds.forEach((accountId, sortOrder) => {
+      update.run({ accountId, sortOrder })
+    })
+    db.exec('COMMIT')
+  } catch (error) {
+    db.exec('ROLLBACK')
+    throw error
+  }
+
+  return listAccounts()
 }
 
 function mapAccountRow(row: AccountRow): MailAccount {
@@ -587,6 +639,20 @@ function validateSyncInterval(value: number): number {
     throw new Error('同步间隔必须是 1 到 1440 之间的整数。')
   }
   return value
+}
+
+function normalizeAccountIds(accountIds: number[]): number[] {
+  if (!Array.isArray(accountIds)) throw new Error('邮箱 ID 列表无效。')
+
+  const normalizedIds = accountIds.map(Number)
+  if (normalizedIds.some((accountId) => !Number.isInteger(accountId) || accountId <= 0)) {
+    throw new Error('邮箱 ID 列表无效。')
+  }
+  if (new Set(normalizedIds).size !== normalizedIds.length) {
+    throw new Error('邮箱 ID 列表不能包含重复项。')
+  }
+
+  return normalizedIds
 }
 
 function listStoredFolders(accountId: number): AccountMailFolder[] {

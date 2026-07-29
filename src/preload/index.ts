@@ -18,7 +18,9 @@ const api = {
     discoverFolders: (accountId) => ipcRenderer.invoke('accounts/discoverFolders', accountId),
     reauthorize: (accountId) => ipcRenderer.invoke('accounts/reauthorize', accountId),
     disable: (accountId) => ipcRenderer.invoke('accounts/disable', accountId),
-    remove: (accountId) => ipcRenderer.invoke('accounts/remove', accountId)
+    remove: (accountId) => ipcRenderer.invoke('accounts/remove', accountId),
+    removeMany: (input) => ipcRenderer.invoke('accounts/removeMany', input),
+    reorder: (input) => ipcRenderer.invoke('accounts/reorder', input)
   },
   logos: {
     get: (domain) => ipcRenderer.invoke('logos/get', domain)
@@ -97,6 +99,11 @@ const api = {
       ipcRenderer.on('settings/backupImportProgress', listener)
       return () => ipcRenderer.off('settings/backupImportProgress', listener)
     }
+  },
+  translations: {
+    getSettings: () => ipcRenderer.invoke('translations/getSettings'),
+    updateSettings: (input) => ipcRenderer.invoke('translations/updateSettings', input),
+    translate: (input) => ipcRenderer.invoke('translations/translate', input)
   },
   updates: {
     check: () => ipcRenderer.invoke('updates/check'),

@@ -5,13 +5,20 @@ import {
   getAccount,
   listAccounts,
   removeAccount,
+  removeAccounts,
+  reorderAccounts,
   updateAccount,
   updateAccountIdleSupport
 } from '../db/repositories/account.repository'
 import { testImapConnection, testImapOAuthConnection } from '../services/imap-connection-test'
 import { testPop3Connection } from '../mail/pop3-session'
 import { refreshMailboxWatchers } from '../services/mailbox-watch'
-import type { AccountCreateInput, AccountCreatedEvent, AccountUpdateInput } from './types'
+import type {
+  AccountCreateInput,
+  AccountCreatedEvent,
+  AccountOrderInput,
+  AccountUpdateInput
+} from './types'
 import { saveAccountPassword, readAccountPassword } from '../services/credential-store'
 import { authorizeMicrosoftAccount, saveMicrosoftAuthorization } from '../services/microsoft-oauth'
 import { closeAddAccountWindow, openAddAccountWindow } from '../services/add-account-window'
@@ -165,6 +172,18 @@ export function registerAccountIpc(): void {
     const removed = removeAccount(accountId)
     refreshMailboxWatchers()
     return removed
+  })
+  ipcMain.handle('accounts/removeMany', (_event, input: AccountOrderInput) => {
+    if (!input || !Array.isArray(input.accountIds)) throw new Error('邮箱 ID 列表无效。')
+    const removedAccountIds = removeAccounts(input.accountIds)
+    refreshMailboxWatchers()
+    return { removedAccountIds }
+  })
+  ipcMain.handle('accounts/reorder', (_event, input: AccountOrderInput) => {
+    if (!input || !Array.isArray(input.accountIds)) throw new Error('邮箱 ID 列表无效。')
+    const accounts = reorderAccounts(input.accountIds)
+    refreshMailboxWatchers()
+    return accounts
   })
 }
 

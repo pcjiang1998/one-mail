@@ -21,7 +21,7 @@ export function resolveAccountSyncPolicy(
     case 'manual':
       return { mode: 'manual' }
     case 'interval':
-      return { mode: 'interval', intervalMinutes: positive(account.accountSyncIntervalMinutes, 15) }
+      return { mode: 'interval', intervalMinutes: positive(account.accountSyncIntervalMinutes, 5) }
     case 'fallback':
       return fallback()
     case 'idle':
@@ -32,7 +32,7 @@ export function resolveAccountSyncPolicy(
       if (settings.globalSyncMode === 'interval') {
         return {
           mode: 'interval',
-          intervalMinutes: positive(settings.globalSyncIntervalMinutes, 15)
+          intervalMinutes: positive(settings.globalSyncIntervalMinutes, 5)
         }
       }
       return supportsIdle ? { mode: 'idle' } : fallback()

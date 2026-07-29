@@ -1,7 +1,9 @@
 export type {
   AccountCreateInput,
   AccountCreatedEvent,
+  AccountBulkRemoveResult,
   AccountMailFolder,
+  AccountOrderInput,
   AccountSyncRunResult,
   AccountStatus,
   AccountMailboxStats,
@@ -69,5 +71,11 @@ export type {
   SignatureMode,
   SmtpSecurity,
   SyncStatus,
-  SystemInfo
+  SystemInfo,
+  TranslationLanguage,
+  TranslationProvider,
+  TranslationProviderConfig,
+  TranslationRequest,
+  TranslationResult,
+  TranslationSettings
 } from '../../shared/types'

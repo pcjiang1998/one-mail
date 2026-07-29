@@ -6,7 +6,9 @@ import type {
   BackupSyncSettings,
   MailSignature,
   MailSignatureInput,
-  SettingsUpdateInput
+  SettingsUpdateInput,
+  TranslationProvider,
+  TranslationSettings
 } from '../../ipc/types'
 
 const defaultSettings: AppSettings = {
@@ -15,14 +17,78 @@ const defaultSettings: AppSettings = {
   openAtLogin: false,
   externalImagesBlocked: true,
   locale: 'zh-CN',
+  theme: 'light',
+  updateCheckFrequency: 'daily',
   syncDeleteToRemote: true,
   globalProxyMode: 'none',
   globalSignatureId: null,
   globalSyncMode: 'idle',
-  globalSyncIntervalMinutes: 15,
+  globalSyncIntervalMinutes: 5,
   fallbackSyncMode: 'interval',
   fallbackSyncIntervalMinutes: 5,
   signatures: []
+}
+
+const translationProviders: TranslationProvider[] = [
+  'aliyun',
+  'baidu',
+  'baidufield',
+  'caiyun',
+  'claude',
+  'cnki',
+  'deeplcustom',
+  'gemini',
+  'google',
+  'huoshan',
+  'huoshanweb',
+  'microsoft',
+  'deepl',
+  'libretranslate',
+  'deeplx',
+  'niutrans',
+  'openai',
+  'tencent',
+  'tencenttransmart'
+]
+
+const defaultTranslationSettings: TranslationSettings = {
+  activeProvider: 'google',
+  targetLanguage: 'zh-CN',
+  providers: {
+    aliyun: {
+      endpoint: 'https://mt.aliyuncs.com',
+      action: 'TranslateGeneral',
+      scene: 'general'
+    },
+    baidu: { endpoint: 'https://api.fanyi.baidu.com/api/trans/vip/translate' },
+    baidufield: { endpoint: 'https://api.fanyi.baidu.com/api/trans/vip/fieldtranslate' },
+    caiyun: { endpoint: 'https://api.interpreter.caiyunai.com/v1/translator' },
+    claude: {
+      endpoint: 'https://api.anthropic.com/v1/messages',
+      model: 'claude-3-7-sonnet-20250219'
+    },
+    cnki: { endpoint: 'https://dict.cnki.net/fyzs-front-api' },
+    deeplcustom: { endpoint: 'http://localhost:1188/translate' },
+    gemini: {
+      endpoint: 'https://generativelanguage.googleapis.com/v1beta/models',
+      model: 'gemini-2.5-flash-lite'
+    },
+    google: { endpoint: 'https://translate.googleapis.com' },
+    huoshan: { endpoint: 'https://translate.volcengineapi.com' },
+    huoshanweb: { endpoint: 'https://translate.volcengine.com/crx/translate/v1' },
+    microsoft: { endpoint: 'https://api.cognitive.microsofttranslator.com' },
+    deepl: { endpoint: 'https://api-free.deepl.com/v2/translate' },
+    libretranslate: { endpoint: 'http://localhost:5000/translate' },
+    deeplx: { endpoint: 'https://www2.deepl.com/jsonrpc' },
+    niutrans: { endpoint: 'https://niutrans.com/niuInterface' },
+    openai: {
+      endpoint: 'https://api.openai.com/v1/responses',
+      model: 'gpt-4o-mini',
+      apiMode: 'responses'
+    },
+    tencent: { endpoint: 'https://tmt.tencentcloudapi.com' },
+    tencenttransmart: { endpoint: 'https://transmart.qq.com/api/imt' }
+  }
 }
 
 const settingsDefinition = {
@@ -31,6 +97,8 @@ const settingsDefinition = {
   openAtLogin: { key: 'open_at_login', type: 'boolean' },
   externalImagesBlocked: { key: 'external_images_blocked', type: 'boolean' },
   locale: { key: 'locale', type: 'string' },
+  theme: { key: 'theme', type: 'string' },
+  updateCheckFrequency: { key: 'update_check_frequency', type: 'string' },
   syncDeleteToRemote: { key: 'sync_delete_to_remote', type: 'boolean' },
   globalProxyMode: { key: 'global_proxy_mode', type: 'string' },
   globalProxyUrl: { key: 'global_proxy_url', type: 'string' },
@@ -40,7 +108,8 @@ const settingsDefinition = {
   fallbackSyncMode: { key: 'fallback_sync_mode', type: 'string' },
   fallbackSyncIntervalMinutes: { key: 'fallback_sync_interval_minutes', type: 'number' },
   lastAttachmentDownloadDir: { key: 'last_attachment_download_dir', type: 'string' },
-  backupSyncSettings: { key: 'backup_sync_settings', type: 'json' }
+  backupSyncSettings: { key: 'backup_sync_settings', type: 'json' },
+  translationSettings: { key: 'translation_settings', type: 'json' }
 } as const
 
 type EncryptedSettingsPayload = {
@@ -80,6 +149,25 @@ export function getSettings(): AppSettings {
       true
     ),
     locale: byKey.get(settingsDefinition.locale.key)?.setting_value ?? defaultSettings.locale,
+    theme: readEnum(
+      byKey.get(settingsDefinition.theme.key),
+      [
+        'light',
+        'dark',
+        'blue-light',
+        'green-light',
+        'rose-light',
+        'blue-dark',
+        'green-dark',
+        'burgundy-dark'
+      ],
+      defaultSettings.theme
+    ),
+    updateCheckFrequency: readEnum(
+      byKey.get(settingsDefinition.updateCheckFrequency.key),
+      ['manual', 'daily', 'weekly'],
+      defaultSettings.updateCheckFrequency
+    ),
     syncDeleteToRemote: readBoolean(
       byKey.get(settingsDefinition.syncDeleteToRemote.key),
       defaultSettings.syncDeleteToRemote
@@ -143,6 +231,12 @@ export function updateSettings(input: SettingsUpdateInput): AppSettings {
     settingsDefinition.externalImagesBlocked.type
   )
   writeSetting(settingsDefinition.locale.key, next.locale, settingsDefinition.locale.type)
+  writeSetting(settingsDefinition.theme.key, next.theme, settingsDefinition.theme.type)
+  writeSetting(
+    settingsDefinition.updateCheckFrequency.key,
+    next.updateCheckFrequency,
+    settingsDefinition.updateCheckFrequency.type
+  )
   writeSetting(
     settingsDefinition.syncDeleteToRemote.key,
     next.syncDeleteToRemote ? '1' : '0',
@@ -200,7 +294,7 @@ export function updateBackupSyncSettings(input: BackupSyncSettings): BackupSyncS
 
   writeSetting(
     settingsDefinition.backupSyncSettings.key,
-    encryptBackupSyncSettings(nextSettings),
+    encryptSensitiveSettings(nextSettings),
     settingsDefinition.backupSyncSettings.type
   )
 
@@ -209,6 +303,24 @@ export function updateBackupSyncSettings(input: BackupSyncSettings): BackupSyncS
 
 export function resolveBackupSyncSettingsForMain(input: BackupSyncSettings): BackupSyncSettings {
   return normalizeBackupSyncSettings(input, readBackupSyncSettings())
+}
+
+export function getTranslationSettings(): TranslationSettings {
+  return redactTranslationSettings(readTranslationSettings())
+}
+
+export function getTranslationSettingsForMain(): TranslationSettings {
+  return readTranslationSettings()
+}
+
+export function updateTranslationSettings(input: TranslationSettings): TranslationSettings {
+  const nextSettings = normalizeTranslationSettings(input, readTranslationSettings())
+  writeSetting(
+    settingsDefinition.translationSettings.key,
+    encryptSensitiveSettings(nextSettings),
+    settingsDefinition.translationSettings.type
+  )
+  return redactTranslationSettings(nextSettings)
 }
 
 export function listSignatures(): MailSignature[] {
@@ -348,6 +460,16 @@ function ensureDefaultSettings(): void {
     settingsDefinition.locale.type
   )
   updateMissingSetting(
+    settingsDefinition.theme.key,
+    defaultSettings.theme,
+    settingsDefinition.theme.type
+  )
+  updateMissingSetting(
+    settingsDefinition.updateCheckFrequency.key,
+    defaultSettings.updateCheckFrequency,
+    settingsDefinition.updateCheckFrequency.type
+  )
+  updateMissingSetting(
     settingsDefinition.syncDeleteToRemote.key,
     defaultSettings.syncDeleteToRemote ? '1' : '0',
     settingsDefinition.syncDeleteToRemote.type
@@ -422,7 +544,7 @@ function readBackupSyncSettings(): BackupSyncSettings {
   if (!row?.setting_value) return { provider: 'none' }
 
   try {
-    const settings = JSON.parse(decryptBackupSyncSettings(row.setting_value)) as BackupSyncSettings
+    const settings = JSON.parse(decryptSensitiveSettings(row.setting_value)) as BackupSyncSettings
     return normalizeStoredBackupSyncSettings(settings)
   } catch {
     return { provider: 'none' }
@@ -535,6 +657,112 @@ function redactBackupSyncSettings(settings: BackupSyncSettings): BackupSyncSetti
   return { provider: 'none' }
 }
 
+function readTranslationSettings(): TranslationSettings {
+  const row = readSetting(settingsDefinition.translationSettings.key)
+  if (!row?.setting_value) return cloneDefaultTranslationSettings()
+
+  try {
+    const settings = JSON.parse(decryptSensitiveSettings(row.setting_value)) as TranslationSettings
+    return normalizeTranslationSettings(settings, cloneDefaultTranslationSettings())
+  } catch {
+    return cloneDefaultTranslationSettings()
+  }
+}
+
+function normalizeTranslationSettings(
+  input: TranslationSettings,
+  current: TranslationSettings
+): TranslationSettings {
+  const activeProvider =
+    input && translationProviders.includes(input.activeProvider)
+      ? input.activeProvider
+      : current.activeProvider
+  const targetLanguage = isTranslationLanguage(input?.targetLanguage)
+    ? input.targetLanguage
+    : current.targetLanguage
+  const providers = {} as TranslationSettings['providers']
+
+  for (const provider of translationProviders) {
+    const defaults = defaultTranslationSettings.providers[provider]
+    const currentConfig = current.providers?.[provider] ?? defaults
+    const inputConfig = input?.providers?.[provider] ?? currentConfig
+    const endpoint =
+      optionalTrim(inputConfig.endpoint) ?? currentConfig.endpoint ?? defaults.endpoint
+    if (endpoint) validateHttpUrl(endpoint, `${provider} Endpoint`)
+
+    providers[provider] = {
+      endpoint,
+      apiKey:
+        optionalTrim(inputConfig.apiKey) ??
+        (inputConfig.apiKeyConfigured === false ? undefined : currentConfig.apiKey),
+      model: optionalTrim(inputConfig.model) ?? optionalTrim(currentConfig.model) ?? defaults.model,
+      apiMode: isOpenAiApiMode(inputConfig.apiMode)
+        ? inputConfig.apiMode
+        : provider === 'openai' && endpoint?.includes('/chat/completions')
+          ? 'chat-completions'
+          : isOpenAiApiMode(currentConfig.apiMode)
+            ? currentConfig.apiMode
+            : defaults.apiMode,
+      action:
+        optionalTrim(inputConfig.action) ?? optionalTrim(currentConfig.action) ?? defaults.action,
+      scene: optionalTrim(inputConfig.scene) ?? optionalTrim(currentConfig.scene) ?? defaults.scene,
+      dictionaryId:
+        optionalTrim(inputConfig.dictionaryId) ?? optionalTrim(currentConfig.dictionaryId),
+      memoryId: optionalTrim(inputConfig.memoryId) ?? optionalTrim(currentConfig.memoryId),
+      termRepositoryIds:
+        optionalTrim(inputConfig.termRepositoryIds) ??
+        optionalTrim(currentConfig.termRepositoryIds),
+      sentenceRepositoryIds:
+        optionalTrim(inputConfig.sentenceRepositoryIds) ??
+        optionalTrim(currentConfig.sentenceRepositoryIds)
+    }
+  }
+
+  return { activeProvider, targetLanguage, providers }
+}
+
+function redactTranslationSettings(settings: TranslationSettings): TranslationSettings {
+  const providers = {} as TranslationSettings['providers']
+  for (const provider of translationProviders) {
+    const config = settings.providers[provider]
+    providers[provider] = {
+      endpoint: config.endpoint,
+      apiKeyConfigured: Boolean(config.apiKey),
+      model: config.model,
+      apiMode: config.apiMode,
+      action: config.action,
+      scene: config.scene,
+      dictionaryId: config.dictionaryId,
+      memoryId: config.memoryId,
+      termRepositoryIds: config.termRepositoryIds,
+      sentenceRepositoryIds: config.sentenceRepositoryIds
+    }
+  }
+  return { ...settings, providers }
+}
+
+function cloneDefaultTranslationSettings(): TranslationSettings {
+  return {
+    ...defaultTranslationSettings,
+    providers: Object.fromEntries(
+      translationProviders.map((provider) => [
+        provider,
+        { ...defaultTranslationSettings.providers[provider] }
+      ])
+    ) as TranslationSettings['providers']
+  }
+}
+
+function isTranslationLanguage(value: unknown): value is TranslationSettings['targetLanguage'] {
+  return ['zh-CN', 'zh-TW', 'en', 'ja', 'ko', 'de', 'fr', 'es'].includes(String(value))
+}
+
+function isOpenAiApiMode(
+  value: unknown
+): value is NonNullable<TranslationSettings['providers']['openai']['apiMode']> {
+  return value === 'responses' || value === 'chat-completions'
+}
+
 function optionalTrim(value?: string): string | undefined {
   const trimmed = value?.trim()
   return trimmed ? trimmed : undefined
@@ -579,6 +807,23 @@ function validateSettings(settings: AppSettings): void {
   validateIntegerRange(settings.fallbackSyncIntervalMinutes, 1, 1440, '回退同步间隔')
 
   if (!['zh-CN', 'en-US'].includes(settings.locale)) throw new Error('不支持的界面语言。')
+  if (
+    ![
+      'light',
+      'dark',
+      'blue-light',
+      'green-light',
+      'rose-light',
+      'blue-dark',
+      'green-dark',
+      'burgundy-dark'
+    ].includes(settings.theme)
+  ) {
+    throw new Error('不支持的主题设置。')
+  }
+  if (!['manual', 'daily', 'weekly'].includes(settings.updateCheckFrequency)) {
+    throw new Error('不支持的更新检查频率。')
+  }
   if (!['none', 'system', 'custom'].includes(settings.globalProxyMode)) {
     throw new Error('不支持的全局代理模式。')
   }
@@ -622,7 +867,7 @@ function validateSocks5Url(value?: string): void {
   }
 }
 
-function encryptBackupSyncSettings(settings: BackupSyncSettings): string {
+function encryptSensitiveSettings(settings: unknown): string {
   const iv = randomBytes(12)
   const cipher = createCipheriv('aes-256-gcm', getSettingsEncryptionKey(), iv)
   const plaintext = JSON.stringify(settings)
@@ -638,12 +883,12 @@ function encryptBackupSyncSettings(settings: BackupSyncSettings): string {
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64')
 }
 
-function decryptBackupSyncSettings(value: string): string {
+function decryptSensitiveSettings(value: string): string {
   const payload = JSON.parse(
     Buffer.from(value, 'base64').toString('utf8')
   ) as EncryptedSettingsPayload
   if (payload.version !== 1 || payload.alg !== 'aes-256-gcm') {
-    throw new Error('远端同步配置加密格式不支持。')
+    throw new Error('敏感设置加密格式不支持。')
   }
 
   const decipher = createDecipheriv(

@@ -541,13 +541,13 @@ export function SyncSettings({
     settings?.globalSyncMode ?? 'idle'
   )
   const [globalInterval, setGlobalInterval] = React.useState(
-    settings?.globalSyncIntervalMinutes ?? 15
+    settings?.globalSyncIntervalMinutes ?? 5
   )
   const [fallbackMode, setFallbackMode] = React.useState<FallbackSyncMode>(
     settings?.fallbackSyncMode ?? 'interval'
   )
   const [fallbackInterval, setFallbackInterval] = React.useState(
-    settings?.fallbackSyncIntervalMinutes ?? 15
+    settings?.fallbackSyncIntervalMinutes ?? 5
   )
   const [pending, setPending] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
@@ -667,7 +667,7 @@ function AccountSyncRow({
   const idleEligible = account.receiveProtocol === 'imap' && account.idleSupported === true
   const initialMode = normalizeAccountSyncMode(account.syncMode, idleEligible)
   const [mode, setMode] = React.useState<AccountSyncMode>(initialMode)
-  const [interval, setInterval] = React.useState(account.accountSyncIntervalMinutes ?? 15)
+  const [interval, setInterval] = React.useState(account.accountSyncIntervalMinutes ?? 5)
   const [pending, setPending] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
 

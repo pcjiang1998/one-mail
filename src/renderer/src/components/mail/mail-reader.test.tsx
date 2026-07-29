@@ -1,9 +1,14 @@
-import { render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+
+vi.mock('@renderer/lib/api', () => ({
+  translateMail: vi.fn()
+}))
 
 import type { Message } from './types'
 import { MailReader } from './mail-reader'
 import { I18nProvider } from '@renderer/lib/i18n'
+import { translateMail } from '@renderer/lib/api'
 
 function createMessage(overrides: Partial<Message> = {}): Message {
   return {
@@ -99,6 +104,42 @@ describe('MailReader remote content', () => {
     )
 
     expect(await screen.findByText('加载完整内容')).toBeInTheDocument()
+  })
+})
+
+describe('MailReader translation', () => {
+  it('translates only HTML text nodes without mutating the original used by reply', async () => {
+    const message = createMessage({
+      html: '<div class="message" style="color: red">Original <strong>content</strong></div>'
+    })
+    const onReply = vi.fn()
+    vi.mocked(translateMail).mockResolvedValue({
+      provider: 'google',
+      targetLanguage: 'zh-CN',
+      translatedText: '原始\n内容',
+      translatedSegments: ['原始', '内容']
+    })
+    renderMailReader(
+      <MailReader
+        message={message}
+        recipientAddress="account@example.com"
+        onLoadBody={() => {}}
+        onReply={onReply}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '翻译' }))
+
+    expect(await screen.findByText('译文')).toBeInTheDocument()
+    expect(screen.getByText('原始')).toBeInTheDocument()
+    expect(translateMail).toHaveBeenCalledWith({ segments: ['Original', 'content'] })
+    expect(JSON.stringify(vi.mocked(translateMail).mock.calls)).not.toContain('color: red')
+    expect(message.html).toBe(
+      '<div class="message" style="color: red">Original <strong>content</strong></div>'
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '回复' }))
+    expect(onReply).toHaveBeenCalledTimes(1)
   })
 })
 

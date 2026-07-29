@@ -22,10 +22,13 @@ import {
 } from '../connection'
 import {
   getBackupSyncSettings,
+  getTranslationSettings,
+  getTranslationSettingsForMain,
   getSettings,
   deleteSignature,
   saveSignature,
   updateBackupSyncSettings,
+  updateTranslationSettings,
   updateSettings
 } from './settings.repository'
 
@@ -76,10 +79,96 @@ describe('settings repository backup sync', () => {
   })
 
   it('defaults remote deletion sync on and persists changes', () => {
-    expect(getSettings().syncDeleteToRemote).toBe(true)
+    expect(getSettings()).toMatchObject({
+      syncDeleteToRemote: true,
+      theme: 'light',
+      updateCheckFrequency: 'daily',
+      globalProxyMode: 'none',
+      globalSignatureId: null,
+      globalSyncMode: 'idle',
+      globalSyncIntervalMinutes: 5,
+      fallbackSyncMode: 'interval',
+      fallbackSyncIntervalMinutes: 5
+    })
 
     expect(updateSettings({ syncDeleteToRemote: false }).syncDeleteToRemote).toBe(false)
     expect(getSettings().syncDeleteToRemote).toBe(false)
+  })
+
+  it('persists color theme and update check frequency', () => {
+    expect(updateSettings({ theme: 'green-dark', updateCheckFrequency: 'weekly' })).toMatchObject({
+      theme: 'green-dark',
+      updateCheckFrequency: 'weekly'
+    })
+    expect(getSettings()).toMatchObject({
+      theme: 'green-dark',
+      updateCheckFrequency: 'weekly'
+    })
+    expect(() => updateSettings({ updateCheckFrequency: 'hourly' as 'daily' })).toThrow(
+      '更新检查频率'
+    )
+  })
+
+  it('encrypts translation secrets and preserves each provider configuration', () => {
+    const defaults = getTranslationSettings()
+    const saved = updateTranslationSettings({
+      ...defaults,
+      activeProvider: 'deepl',
+      providers: {
+        ...defaults.providers,
+        deepl: {
+          ...defaults.providers.deepl,
+          apiKey: 'deepl-secret',
+          endpoint: 'https://api-free.deepl.com/v2/translate'
+        },
+        openai: {
+          ...defaults.providers.openai,
+          apiKey: 'openai-secret',
+          endpoint: 'https://translation.example.com/v1/chat/completions',
+          model: 'translation-model',
+          apiMode: 'chat-completions'
+        },
+        tencent: {
+          ...defaults.providers.tencent,
+          apiKey: 'secret-id#secret-key#ap-shanghai#0',
+          termRepositoryIds: 'term-1,term-2'
+        }
+      }
+    })
+
+    expect(saved.providers.deepl).toMatchObject({ apiKeyConfigured: true })
+    expect(saved.providers.deepl.apiKey).toBeUndefined()
+    expect(saved.providers.openai).toMatchObject({
+      apiKeyConfigured: true,
+      endpoint: 'https://translation.example.com/v1/chat/completions',
+      model: 'translation-model',
+      apiMode: 'chat-completions'
+    })
+    expect(saved.providers.tencent).toMatchObject({
+      apiKeyConfigured: true,
+      termRepositoryIds: 'term-1,term-2'
+    })
+    expect(getTranslationSettingsForMain().providers.deepl.apiKey).toBe('deepl-secret')
+    expect(getTranslationSettingsForMain().providers.openai.apiKey).toBe('openai-secret')
+    expect(getTranslationSettingsForMain().providers.tencent.apiKey).toBe(
+      'secret-id#secret-key#ap-shanghai#0'
+    )
+
+    const row = getDatabase()
+      .prepare<{
+        setting_value: string
+      }>(
+        "SELECT setting_value FROM onemail_app_settings WHERE setting_key = 'translation_settings'"
+      )
+      .get()
+    expect(row?.setting_value).not.toContain('deepl-secret')
+    expect(row?.setting_value).not.toContain('openai-secret')
+    expect(row?.setting_value).not.toContain('secret-key')
+
+    const switched = updateTranslationSettings({ ...saved, activeProvider: 'openai' })
+    expect(switched.activeProvider).toBe('openai')
+    expect(getTranslationSettingsForMain().providers.deepl.apiKey).toBe('deepl-secret')
+    expect(getTranslationSettingsForMain().providers.openai.apiKey).toBe('openai-secret')
   })
 
   it('accepts an unlimited cache window and validates advanced settings', () => {

@@ -3,11 +3,13 @@ import {
   FileText,
   Forward,
   Image,
+  Languages,
   Loader2,
   Paperclip,
   Reply,
   ShieldCheck,
-  Trash2
+  Trash2,
+  X
 } from 'lucide-react'
 import * as React from 'react'
 
@@ -23,6 +25,11 @@ import {
   getDisplaySubject
 } from '@renderer/components/mail/mail-display'
 import { prepareMailHtml, type PreparedMailHtml } from '@renderer/components/mail/mail-html'
+import {
+  applyHtmlTranslationTemplate,
+  createHtmlTranslationTemplate,
+  getMessageTranslationText
+} from '@renderer/components/mail/mail-translation-text'
 import type { Attachment, Message } from '@renderer/components/mail/types'
 import { Button } from '@renderer/components/ui/button'
 import { Skeleton } from '@renderer/components/ui/skeleton'
@@ -41,6 +48,7 @@ import {
   TooltipTrigger
 } from '@renderer/components/ui/tooltip'
 import { useI18n, type TranslationKey } from '@renderer/lib/i18n'
+import { translateMail } from '@renderer/lib/api'
 
 const REMOTE_IMAGES_HELP_URL = 'https://huzhihui.com/blog/click-load-images-ip-leak-email-tracking'
 const MAIL_HTML_PREPARE_DELAY_MS = 40
@@ -52,6 +60,15 @@ type PreparedMailHtmlState = {
   result: PreparedMailHtml
 }
 
+type ReaderTranslationState = {
+  messageId: string
+  open: boolean
+  pending: boolean
+  translatedText?: string
+  translatedHtml?: string
+  error?: string
+}
+
 type MailReaderProps = {
   message: Message
   recipientAddress: string
@@ -61,7 +78,7 @@ type MailReaderProps = {
   downloadingAttachmentIds?: Set<number>
   actionPending?: boolean
   deleting?: boolean
-  onLoadBody: () => void
+  onLoadBody: () => void | Promise<Message | undefined>
   onDownloadAttachment?: (attachment: Attachment) => void
   onReply?: () => void
   onForward?: () => void
@@ -117,6 +134,15 @@ export function MailReader({
   const displayRecipientAddress = message.to ?? recipientAddress
   const displaySubject = getDisplaySubject(message, t)
   const displaySender = getDisplaySender(message, t)
+  const [translationState, setTranslationState] = React.useState<ReaderTranslationState>({
+    messageId: message.id,
+    open: false,
+    pending: false
+  })
+  const activeTranslation =
+    translationState.messageId === message.id
+      ? translationState
+      : { messageId: message.id, open: false, pending: false }
 
   React.useEffect(() => {
     if (!canShowHtml) return
@@ -139,6 +165,58 @@ export function MailReader({
       window.clearTimeout(timer)
     }
   }, [canShowHtml, externalContentAllowed, htmlSource, message.id])
+
+  async function handleTranslate(): Promise<void> {
+    setTranslationState({ messageId: message.id, open: true, pending: true })
+    try {
+      let sourceMessage = message
+      if (!message.bodyLoaded && !message.html) {
+        const loadedMessage = await onLoadBody()
+        if (!loadedMessage) throw new Error(t('mail.reader.translationLoadError'))
+        sourceMessage = loadedMessage
+      }
+      if (sourceMessage.html?.trim()) {
+        const sourceHtml =
+          sourceMessage.id === message.id && preparedHtml
+            ? preparedHtml.html
+            : prepareMailHtml(sourceMessage.html, {
+                allowExternalImages: externalContentAllowed
+              }).html
+        const template = createHtmlTranslationTemplate(sourceHtml)
+        if (template.segments.length === 0) throw new Error(t('mail.reader.translationEmpty'))
+        const result = await translateMail({ segments: template.segments })
+        if (!result.translatedSegments) throw new Error(t('mail.reader.translationError'))
+        setTranslationState({
+          messageId: message.id,
+          open: true,
+          pending: false,
+          translatedText: result.translatedText,
+          translatedHtml: applyHtmlTranslationTemplate(template, result.translatedSegments)
+        })
+        return
+      }
+
+      const text = getMessageTranslationText(sourceMessage)
+      if (!text) throw new Error(t('mail.reader.translationEmpty'))
+      const result = await translateMail({ text })
+      setTranslationState({
+        messageId: message.id,
+        open: true,
+        pending: false,
+        translatedText: result.translatedText
+      })
+    } catch (translationError) {
+      setTranslationState({
+        messageId: message.id,
+        open: true,
+        pending: false,
+        error:
+          translationError instanceof Error
+            ? translationError.message
+            : t('mail.reader.translationError')
+      })
+    }
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-background">
@@ -248,22 +326,56 @@ export function MailReader({
           </div>
         </section>
 
-        <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
-          {loading && !message.detailLoaded ? (
-            <section className="text-xs text-muted-foreground">
-              {t('mail.reader.loadingDetails')}
-            </section>
-          ) : (
-            <MessageBody
-              message={message}
-              canShowHtml={canShowHtml}
-              canLoadBody={canLoadBody}
-              loadingBody={loadingBody}
-              preparedHtml={preparedHtml}
-              t={t}
-              onLoadBody={onLoadBody}
-            />
-          )}
+        <div className="relative min-h-0 flex-1">
+          <div className="h-full overflow-auto px-5 pt-4 pb-16">
+            {loading && !message.detailLoaded ? (
+              <section className="text-xs text-muted-foreground">
+                {t('mail.reader.loadingDetails')}
+              </section>
+            ) : activeTranslation.open ? (
+              <TranslatedMessageBody
+                message={message}
+                canShowHtml={canShowHtml}
+                canLoadBody={canLoadBody}
+                loadingBody={loadingBody}
+                preparedHtml={preparedHtml}
+                translation={activeTranslation}
+                t={t}
+                onLoadBody={onLoadBody}
+                onClose={() =>
+                  setTranslationState({ messageId: message.id, open: false, pending: false })
+                }
+              />
+            ) : (
+              <MessageBody
+                message={message}
+                canShowHtml={canShowHtml}
+                canLoadBody={canLoadBody}
+                loadingBody={loadingBody}
+                preparedHtml={preparedHtml}
+                t={t}
+                onLoadBody={onLoadBody}
+              />
+            )}
+          </div>
+
+          <div className="pointer-events-none absolute right-5 bottom-4 z-10 flex justify-end">
+            <Button
+              className="pointer-events-auto shadow-md"
+              size="sm"
+              disabled={activeTranslation.pending || loadingBody}
+              onClick={() => void handleTranslate()}
+            >
+              {activeTranslation.pending ? (
+                <Loader2 data-icon="inline-start" className="animate-spin" />
+              ) : (
+                <Languages data-icon="inline-start" />
+              )}
+              {activeTranslation.open
+                ? t('mail.reader.translateAgain')
+                : t('mail.reader.translate')}
+            </Button>
+          </div>
         </div>
 
         {hasRealAttachments ? (
@@ -347,7 +459,7 @@ function MessageBody({
   loadingBody: boolean
   preparedHtml: PreparedMailHtml | null
   t: (key: TranslationKey, values?: Record<string, string | number>) => string
-  onLoadBody: () => void
+  onLoadBody: () => void | Promise<Message | undefined>
 }): React.JSX.Element {
   if (!canShowHtml && loadingBody) {
     return <MessageBodySkeleton />
@@ -396,6 +508,81 @@ function MessageBody({
           ))}
         </div>
       )}
+    </section>
+  )
+}
+
+function TranslatedMessageBody({
+  message,
+  canShowHtml,
+  canLoadBody,
+  loadingBody,
+  preparedHtml,
+  translation,
+  t,
+  onLoadBody,
+  onClose
+}: {
+  message: Message
+  canShowHtml: boolean
+  canLoadBody: boolean
+  loadingBody: boolean
+  preparedHtml: PreparedMailHtml | null
+  translation: ReaderTranslationState
+  t: (key: TranslationKey, values?: Record<string, string | number>) => string
+  onLoadBody: () => void | Promise<Message | undefined>
+  onClose: () => void
+}): React.JSX.Element {
+  return (
+    <section className="grid min-h-64 overflow-hidden border-y md:grid-cols-2 md:divide-x">
+      <div className="min-w-0 border-b md:border-b-0">
+        <div className="flex h-9 items-center border-b bg-muted/40 px-3 text-xs font-medium">
+          {t('mail.reader.original')}
+        </div>
+        <div className="min-h-48 overflow-auto p-3">
+          <MessageBody
+            message={message}
+            canShowHtml={canShowHtml}
+            canLoadBody={canLoadBody}
+            loadingBody={loadingBody}
+            preparedHtml={preparedHtml}
+            t={t}
+            onLoadBody={onLoadBody}
+          />
+        </div>
+      </div>
+      <div className="min-w-0">
+        <div className="flex h-9 items-center justify-between gap-2 border-b bg-muted/40 px-3 text-xs font-medium">
+          <span>{t('mail.reader.translation')}</span>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label={t('common.close')}
+            title={t('common.close')}
+            onClick={onClose}
+          >
+            <X />
+          </Button>
+        </div>
+        <div className="min-h-48 overflow-auto p-3">
+          {translation.pending ? (
+            <MessageBodySkeleton />
+          ) : translation.error ? (
+            <div className="flex min-h-40 items-center justify-center text-center text-xs text-destructive">
+              {translation.error}
+            </div>
+          ) : translation.translatedHtml ? (
+            <div
+              className="mail-html min-h-40 select-text bg-background"
+              dangerouslySetInnerHTML={{ __html: translation.translatedHtml }}
+            />
+          ) : (
+            <div className="mail-text min-h-40 whitespace-pre-wrap text-sm leading-6 select-text">
+              {translation.translatedText}
+            </div>
+          )}
+        </div>
+      </div>
     </section>
   )
 }

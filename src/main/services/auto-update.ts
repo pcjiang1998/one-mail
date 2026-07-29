@@ -3,9 +3,16 @@ import { app, BrowserWindow } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import electronUpdater, { type AppUpdater, type ProgressInfo } from 'electron-updater'
 import { isBoringSslBadDecryptError } from '../runtime-errors'
-import type { AppUpdateCheckResult, AppUpdateStatus } from '../../shared/types'
+import type {
+  AppUpdateCheckResult,
+  AppUpdateStatus,
+  UpdateCheckFrequency
+} from '../../shared/types'
 
-const UPDATE_CHECK_INTERVAL_MS = 1000 * 60 * 60 * 6
+const UPDATE_CHECK_INTERVAL_MS: Record<Exclude<UpdateCheckFrequency, 'manual'>, number> = {
+  daily: 1000 * 60 * 60 * 24,
+  weekly: 1000 * 60 * 60 * 24 * 7
+}
 const GITHUB_LATEST_RELEASE_API_URL =
   'https://api.github.com/repos/pcjiang1998/one-mail-next/releases/latest'
 const PACKAGED_APP_UPDATE_UNSUPPORTED_MESSAGE =
@@ -34,25 +41,27 @@ function shouldCheckForUpdates(): boolean {
   return getUpdateUnsupportedMessage() === null
 }
 
-export function startAutoUpdateChecks(): void {
-  if (!shouldCheckForUpdates() || updateCheckTimer) {
-    return
-  }
+export function startAutoUpdateChecks(frequency: UpdateCheckFrequency): void {
+  stopAutoUpdateChecks()
+  if (frequency === 'manual') return
 
-  const autoUpdater = getAutoUpdater()
-  installAutoUpdaterErrorHandler(autoUpdater)
+  const autoUpdater = shouldCheckForUpdates() ? getAutoUpdater() : null
+  if (autoUpdater) installAutoUpdaterErrorHandler(autoUpdater)
 
   const checkForUpdates = (): void => {
-    void autoUpdater
-      .checkForUpdates()
-      .then((result) => result?.downloadPromise?.catch(() => undefined))
-      .catch((error) => {
-        logUpdateError(error)
-      })
+    checkGitHubReleaseForUpdates()
+    if (autoUpdater) {
+      void autoUpdater
+        .checkForUpdates()
+        .then((result) => result?.downloadPromise?.catch(() => undefined))
+        .catch((error) => {
+          logUpdateError(error)
+        })
+    }
   }
 
   checkForUpdates()
-  updateCheckTimer = setInterval(checkForUpdates, UPDATE_CHECK_INTERVAL_MS)
+  updateCheckTimer = setInterval(checkForUpdates, UPDATE_CHECK_INTERVAL_MS[frequency])
 }
 
 export function stopAutoUpdateChecks(): void {
