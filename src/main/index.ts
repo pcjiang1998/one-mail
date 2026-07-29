@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, clipboard, Menu } from 'electron'
 import { mkdirSync } from 'node:fs'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import appIcon from '../../resources/icon.png?asset'
 import windowsIcon from '../../resources/icon.ico?asset'
@@ -16,6 +16,7 @@ import {
   stopMailboxWatchers
 } from './services/mailbox-watch'
 import { setNotificationOpenWindowHandler } from './services/notification-center'
+import { enqueueMailtoUrl, findMailtoUrl } from './services/mailto'
 import {
   destroyTray,
   initializeTray,
@@ -27,6 +28,33 @@ configureDevelopmentUserData()
 installRuntimeErrorGuards()
 
 let mainWindow: BrowserWindow | null = null
+const hasSingleInstanceLock = app.requestSingleInstanceLock()
+
+if (!hasSingleInstanceLock) {
+  app.quit()
+} else {
+  const startupMailtoUrl = findMailtoUrl(process.argv)
+  if (startupMailtoUrl) enqueueMailtoUrl(startupMailtoUrl)
+
+  app.on('second-instance', (_event, commandLine) => {
+    const mailtoUrl = findMailtoUrl(commandLine)
+    if (mailtoUrl) enqueueMailtoUrl(mailtoUrl)
+    if (!app.isReady()) return
+
+    showMainWindow()
+    if (mailtoUrl) notifyMailtoOpened()
+  })
+
+  app.on('open-url', (event, url) => {
+    if (!url.toLowerCase().startsWith('mailto:')) return
+    event.preventDefault()
+    enqueueMailtoUrl(url)
+    if (!app.isReady()) return
+
+    showMainWindow()
+    notifyMailtoOpened()
+  })
+}
 
 function configureDevelopmentUserData(): void {
   if (!is.dev) return
@@ -140,6 +168,25 @@ function showMainWindow(initialRoute = '/'): BrowserWindow {
   return window
 }
 
+function notifyMailtoOpened(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents.send('system/mailtoOpened')
+}
+
+function registerMailtoProtocol(): void {
+  if (process.env.ONE_MAIL_SKIP_PROTOCOL_REGISTRATION === '1') return
+
+  if (process.defaultApp) {
+    const entryPath = process.argv[1]
+    if (entryPath) {
+      app.setAsDefaultProtocolClient('mailto', process.execPath, [resolve(entryPath)])
+    }
+    return
+  }
+
+  app.setAsDefaultProtocolClient('mailto')
+}
+
 function getCopyLinkMenuLabel(): string {
   return app.getLocale().toLowerCase().startsWith('zh') ? '复制链接' : 'Copy link'
 }
@@ -147,38 +194,40 @@ function getCopyLinkMenuLabel(): string {
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
-app.whenReady().then(() => {
-  // Set app user model id for windows
-  electronApp.setAppUserModelId('com.pcjiang1998.onemailnext')
-  if (process.platform === 'darwin') {
-    app.dock?.setIcon(appIcon)
-  }
-  initializeDatabase()
-  registerIpcHandlers()
-  startMailboxWatchers()
-  startAutoUpdateChecks(getSettings().updateCheckFrequency)
-  initializeTray(process.platform === 'win32' ? windowsIcon : appIcon, {
-    showWindow: () => showMainWindow(),
-    syncNow: () => requestManualMailboxSync()
-  })
-  setNotificationOpenWindowHandler((route) => showMainWindow(route))
+if (hasSingleInstanceLock)
+  app.whenReady().then(() => {
+    // Set app user model id for windows
+    electronApp.setAppUserModelId('com.pcjiang1998.onemailnext')
+    registerMailtoProtocol()
+    if (process.platform === 'darwin') {
+      app.dock?.setIcon(appIcon)
+    }
+    initializeDatabase()
+    registerIpcHandlers()
+    startMailboxWatchers()
+    startAutoUpdateChecks(getSettings().updateCheckFrequency)
+    initializeTray(process.platform === 'win32' ? windowsIcon : appIcon, {
+      showWindow: () => showMainWindow(),
+      syncNow: () => requestManualMailboxSync()
+    })
+    setNotificationOpenWindowHandler((route) => showMainWindow(route))
 
-  // Default open or close DevTools by F12 in development
-  // and ignore CommandOrControl + R in production.
-  // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
-  app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window)
-  })
+    // Default open or close DevTools by F12 in development
+    // and ignore CommandOrControl + R in production.
+    // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
+    app.on('browser-window-created', (_, window) => {
+      optimizer.watchWindowShortcuts(window)
+    })
 
-  createWindow()
+    createWindow()
 
-  app.on('activate', function () {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-    else showMainWindow()
+    app.on('activate', function () {
+      // On macOS it's common to re-create a window in the app when the
+      // dock icon is clicked and there are no other windows open.
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+      else showMainWindow()
+    })
   })
-})
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits

@@ -32,6 +32,7 @@ import type {
   SignatureMode,
   SmtpSecurity
 } from '../../../../shared/types'
+import { isValidCustomProxyUrl } from '../../../../shared/proxy-url'
 import { AccountFormField } from './account-form-field'
 
 type EditAccountValues = {
@@ -389,7 +390,7 @@ export function EditAccountDialog({
             {proxyMode === 'custom' ? (
               <Input
                 className="mt-2"
-                placeholder="socks5://127.0.0.1:1080"
+                placeholder="http://127.0.0.1:8080"
                 {...form.register('customProxyUrl')}
               />
             ) : null}
@@ -578,7 +579,7 @@ function createEditAccountSchema(
           message: t('account.form.requiredSmtpHost')
         })
       }
-      if (values.proxyMode === 'custom' && !isValidSocks5Url(values.customProxyUrl)) {
+      if (values.proxyMode === 'custom' && !isValidCustomProxyUrl(values.customProxyUrl)) {
         context.addIssue({
           code: 'custom',
           path: ['customProxyUrl'],
@@ -622,15 +623,6 @@ function formatReceiveServer(account: Account): string {
 
 function toSignatureSelectValue(mode: string, signatureId?: number): string {
   return mode === 'custom' && signatureId ? `signature:${signatureId}` : mode
-}
-
-function isValidSocks5Url(value?: string): boolean {
-  try {
-    const url = new URL(value ?? '')
-    return url.protocol === 'socks5:' && Boolean(url.hostname) && Boolean(url.port)
-  } catch {
-    return false
-  }
 }
 
 function getInitialLabel(account: Account): string {

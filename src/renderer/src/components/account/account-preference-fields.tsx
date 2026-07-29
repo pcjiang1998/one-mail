@@ -56,7 +56,7 @@ export function AccountPreferenceFields({
         {proxyMode === 'custom' ? (
           <Input
             className="mt-2"
-            placeholder="socks5://127.0.0.1:1080"
+            placeholder="http://127.0.0.1:8080"
             aria-invalid={Boolean(form.formState.errors.customProxyUrl)}
             {...form.register('customProxyUrl')}
           />

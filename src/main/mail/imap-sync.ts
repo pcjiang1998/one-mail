@@ -8,6 +8,7 @@ import { toImapConnectionError } from './imap-errors'
 import { parseImapMailboxList, type ImapMailbox } from './imap-mailboxes'
 import { getSelectedFolderPathKeys } from '../services/account-mailboxes'
 import { connectMailSocket } from '../services/network-proxy'
+import { formatImapIdCommand } from './imap-client-id'
 
 type TestSocket = Socket | TLSSocket
 
@@ -427,18 +428,6 @@ async function syncNewInboxMessages(
   persistMailboxStatus(account.accountId, inbox, mailboxStatus)
 
   return syncMailboxRefresh(account, client, inbox, mailboxStatus)
-}
-
-const CLIENT_ID = {
-  name: 'OneMail',
-  version: '1.0.0',
-  vendor: 'OneMail',
-  'support-email': 'support@onemail.local'
-}
-
-function formatImapIdCommand(): string {
-  const values = Object.entries(CLIENT_ID).flatMap(([key, value]) => [key, value])
-  return `ID (${values.map(quoteAtom).join(' ')})`
 }
 
 function formatImapCommandError(line: string): string {

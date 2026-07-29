@@ -1,4 +1,4 @@
-import { GripVertical, LoaderCircle, Mail, Trash2 } from 'lucide-react'
+import { GripVertical, LoaderCircle, Mail, Send, Trash2 } from 'lucide-react'
 import * as React from 'react'
 
 import type { Account } from '@renderer/components/mail/types'
@@ -13,11 +13,20 @@ import {
 import { Button } from '@renderer/components/ui/button'
 import { Checkbox } from '@renderer/components/ui/checkbox'
 import { FieldError } from '@renderer/components/ui/field'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '@renderer/components/ui/select'
 import { cn } from '@renderer/lib/utils'
 import { useI18n } from '@renderer/lib/i18n'
 
 type AccountManagementSettingsProps = {
   accounts: Account[]
+  defaultComposeAccountId: number | null
+  onDefaultComposeAccountChange: (accountId: number) => Promise<void>
   onRemoveAccounts: (accountIds: number[]) => Promise<void>
   onReorderAccounts: (accountIds: number[]) => Promise<void>
 }
@@ -32,6 +41,8 @@ type DragState = {
 
 export function AccountManagementSettings({
   accounts,
+  defaultComposeAccountId,
+  onDefaultComposeAccountChange,
   onRemoveAccounts,
   onReorderAccounts
 }: AccountManagementSettingsProps): React.JSX.Element {
@@ -41,7 +52,7 @@ export function AccountManagementSettings({
   )
   const [selectedIds, setSelectedIds] = React.useState<Set<number>>(new Set())
   const [dragState, setDragState] = React.useState<DragState | null>(null)
-  const [pending, setPending] = React.useState<'delete' | 'reorder' | null>(null)
+  const [pending, setPending] = React.useState<'default' | 'delete' | 'reorder' | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
   const accountById = new Map(
@@ -159,8 +170,57 @@ export function AccountManagementSettings({
     }
   }
 
+  async function handleDefaultAccountChange(value: string): Promise<void> {
+    const accountId = Number(value)
+    if (!Number.isInteger(accountId) || accountId <= 0) return
+
+    setPending('default')
+    setError(null)
+    try {
+      await onDefaultComposeAccountChange(accountId)
+    } catch (updateError) {
+      setError(
+        updateError instanceof Error ? updateError.message : t('settings.accounts.defaultError')
+      )
+    } finally {
+      setPending(null)
+    }
+  }
+
   return (
     <div className="mx-auto flex min-h-full w-full max-w-[620px] flex-col gap-3 p-3 sm:p-4">
+      <div className="grid gap-3 rounded-md border bg-card p-3 sm:grid-cols-[minmax(0,1fr)_220px] sm:items-center">
+        <div className="flex min-w-0 gap-2.5">
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+            <Send className="size-4" aria-hidden="true" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-xs font-medium">{t('settings.accounts.defaultTitle')}</div>
+            <div className="mt-0.5 text-xs leading-snug text-muted-foreground">
+              {t('settings.accounts.defaultDescription')}
+            </div>
+          </div>
+        </div>
+        <Select
+          value={defaultComposeAccountId ? String(defaultComposeAccountId) : undefined}
+          disabled={Boolean(pending) || orderedAccounts.length === 0}
+          onValueChange={(value) => void handleDefaultAccountChange(value)}
+        >
+          <SelectTrigger size="sm" className="w-full">
+            <SelectValue placeholder={t('settings.accounts.defaultPlaceholder')} />
+          </SelectTrigger>
+          <SelectContent>
+            {orderedAccounts.map((account) =>
+              account.accountId ? (
+                <SelectItem key={account.accountId} value={String(account.accountId)}>
+                  {account.name || account.address}
+                </SelectItem>
+              ) : null
+            )}
+          </SelectContent>
+        </Select>
+      </div>
+
       <div className="flex min-h-9 items-center justify-between gap-3 border-b pb-3">
         <label className="flex min-w-0 items-center gap-2 text-xs font-medium">
           <Checkbox

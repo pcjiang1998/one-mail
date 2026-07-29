@@ -12,6 +12,7 @@ import type {
   AccountUpdateInput,
   MailAccount
 } from '../../ipc/types'
+import { parseCustomProxyUrl } from '../../../shared/proxy-url'
 
 type AccountRow = SqliteRow & {
   account_id: number
@@ -596,17 +597,16 @@ function mapAccountRow(row: AccountRow): MailAccount {
 function normalizeProxyUrl(value?: string): string | undefined {
   const proxyUrl = value?.trim()
   if (!proxyUrl) return undefined
-  const parsed = new URL(proxyUrl)
-  if (parsed.protocol !== 'socks5:') {
-    throw new Error('自定义代理仅支持 socks5:// 地址。')
+  const parsed = parseCustomProxyUrl(proxyUrl)
+  if (!parsed) {
+    throw new Error('自定义代理必须是有效的 HTTP、HTTPS、SOCKS4、SOCKS4a、SOCKS5 或 SOCKS5h 地址。')
   }
-  if (!parsed.hostname || !parsed.port) throw new Error('SOCKS5 代理地址缺少主机或端口。')
   return parsed.toString()
 }
 
 function requireProxyUrl(value?: string): string {
   const proxyUrl = normalizeProxyUrl(value)
-  if (!proxyUrl) throw new Error('请输入 SOCKS5 代理地址。')
+  if (!proxyUrl) throw new Error('请输入自定义代理地址。')
   return proxyUrl
 }
 

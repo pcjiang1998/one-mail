@@ -5,6 +5,7 @@ import {
   FileUp,
   Inbox,
   Link,
+  Mail,
   Plus,
   Settings,
   Upload
@@ -185,18 +186,34 @@ export function StatusBar({
   settings,
   accountCount,
   messageCount,
+  unreadCount,
   syncNotice
 }: {
   settings: AppSettings | null
   accountCount: number
   messageCount: number
+  unreadCount: number
   syncNotice: SyncNotice
 }): React.JSX.Element {
   const { t } = useI18n()
   const syncText = formatSyncNotice(syncNotice, t)
 
   return (
-    <footer className="app-drag-region flex h-7 shrink-0 items-center justify-end gap-3 border-t bg-muted/40 px-3 text-xs text-muted-foreground">
+    <footer className="app-drag-region flex h-7 shrink-0 items-center justify-between gap-3 border-t bg-muted/40 px-3 text-xs text-muted-foreground">
+      <div className="app-no-drag min-w-0">
+        {unreadCount > 0 ? (
+          <span
+            className="flex items-center gap-1.5 font-medium text-foreground"
+            title={t('status.unread', { count: unreadCount })}
+          >
+            <Mail
+              className="size-3.5 shrink-0 fill-amber-400/25 text-amber-500"
+              aria-hidden="true"
+            />
+            <span>{unreadCount}</span>
+          </span>
+        ) : null}
+      </div>
       <div className="app-no-drag flex shrink-0 items-center gap-2">
         {syncText ? (
           <span className="max-w-80 truncate text-foreground" title={syncText}>

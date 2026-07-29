@@ -31,6 +31,7 @@ import {
   updateTranslationSettings,
   updateSettings
 } from './settings.repository'
+import { createAccount, removeAccount } from './account.repository'
 
 describe('settings repository backup sync', () => {
   let testDir = ''
@@ -174,10 +175,44 @@ describe('settings repository backup sync', () => {
   it('accepts an unlimited cache window and validates advanced settings', () => {
     expect(updateSettings({ syncWindowDays: 0 }).syncWindowDays).toBe(0)
     expect(() => updateSettings({ syncWindowDays: -1 })).toThrow('缓存窗口')
-    expect(() =>
+    expect(
       updateSettings({ globalProxyMode: 'custom', globalProxyUrl: 'http://127.0.0.1:8080' })
-    ).toThrow('SOCKS5')
+        .globalProxyUrl
+    ).toBe('http://127.0.0.1:8080')
+    expect(() =>
+      updateSettings({ globalProxyMode: 'custom', globalProxyUrl: 'ftp://127.0.0.1:21' })
+    ).toThrow('自定义代理')
     expect(() => updateSettings({ fallbackSyncIntervalMinutes: 0 })).toThrow('回退同步间隔')
+  })
+
+  it('migrates the default compose account and falls back after removal', () => {
+    const first = createAccount({
+      providerKey: 'first-test',
+      email: 'first@example.com',
+      authType: 'password',
+      imapHost: 'imap.example.com',
+      imapPort: 993,
+      imapSecurity: 'ssl_tls'
+    })
+    const second = createAccount({
+      providerKey: 'second-test',
+      email: 'second@example.com',
+      authType: 'password',
+      imapHost: 'imap.example.com',
+      imapPort: 993,
+      imapSecurity: 'ssl_tls'
+    })
+    getDatabase()
+      .prepare("DELETE FROM onemail_app_settings WHERE setting_key = 'default_compose_account_id'")
+      .run()
+
+    expect(getSettings().defaultComposeAccountId).toBe(first.accountId)
+    expect(
+      updateSettings({ defaultComposeAccountId: second.accountId }).defaultComposeAccountId
+    ).toBe(second.accountId)
+
+    removeAccount(second.accountId)
+    expect(getSettings().defaultComposeAccountId).toBe(first.accountId)
   })
 
   it('creates, selects, and deletes mail signatures', () => {

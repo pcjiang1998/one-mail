@@ -120,7 +120,13 @@ const api = {
     setTitleBarTheme: (theme: AppTheme) => ipcRenderer.invoke('system/setTitleBarTheme', theme),
     revealDatabase: () => ipcRenderer.invoke('system/revealDatabase'),
     revealPath: (path) => ipcRenderer.invoke('system/revealPath', path),
-    openExternal: (url) => ipcRenderer.invoke('system/openExternal', url)
+    openExternal: (url) => ipcRenderer.invoke('system/openExternal', url),
+    takePendingMailtoRequests: () => ipcRenderer.invoke('system/takePendingMailtoRequests'),
+    onMailtoOpened: (callback): (() => void) => {
+      const listener = (): void => callback()
+      ipcRenderer.on('system/mailtoOpened', listener)
+      return () => ipcRenderer.off('system/mailtoOpened', listener)
+    }
   }
 }
 

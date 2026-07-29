@@ -4,6 +4,7 @@ import type { getAccount } from '../db/repositories/account.repository'
 import { sanitizeImapResponse, toImapConnectionError } from './imap-errors'
 import { parseImapMailboxList, type ImapMailbox } from './imap-mailboxes'
 import { connectMailSocket } from '../services/network-proxy'
+import { formatImapIdCommand } from './imap-client-id'
 
 type TestSocket = Socket | TLSSocket
 type ImapAccount = NonNullable<ReturnType<typeof getAccount>>
@@ -270,18 +271,6 @@ function sliceUtf8Literal(value: string, start: number, byteLength: number): str
   }
 
   return value.slice(start, end)
-}
-
-const CLIENT_ID = {
-  name: 'OneMail',
-  version: '1.0.0',
-  vendor: 'OneMail',
-  'support-email': 'support@onemail.local'
-}
-
-function formatImapIdCommand(): string {
-  const values = Object.entries(CLIENT_ID).flatMap(([key, value]) => [key, value])
-  return `ID (${values.map(quoteAtom).join(' ')})`
 }
 
 function quoteAtom(value: string): string {

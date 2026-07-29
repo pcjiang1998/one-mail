@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto'
 import { getDatabase, getDatabaseKey } from '../connection'
 import { getOpenAtLogin, setOpenAtLogin } from '../../services/login-item'
+import { parseCustomProxyUrl } from '../../../shared/proxy-url'
 import type {
   AppSettings,
   BackupSyncSettings,
@@ -19,6 +20,7 @@ const defaultSettings: AppSettings = {
   locale: 'zh-CN',
   theme: 'light',
   updateCheckFrequency: 'daily',
+  defaultComposeAccountId: null,
   syncDeleteToRemote: true,
   globalProxyMode: 'none',
   globalSignatureId: null,
@@ -99,6 +101,7 @@ const settingsDefinition = {
   locale: { key: 'locale', type: 'string' },
   theme: { key: 'theme', type: 'string' },
   updateCheckFrequency: { key: 'update_check_frequency', type: 'string' },
+  defaultComposeAccountId: { key: 'default_compose_account_id', type: 'number' },
   syncDeleteToRemote: { key: 'sync_delete_to_remote', type: 'boolean' },
   globalProxyMode: { key: 'global_proxy_mode', type: 'string' },
   globalProxyUrl: { key: 'global_proxy_url', type: 'string' },
@@ -168,6 +171,9 @@ export function getSettings(): AppSettings {
       ['manual', 'daily', 'weekly'],
       defaultSettings.updateCheckFrequency
     ),
+    defaultComposeAccountId: readDefaultComposeAccountId(
+      byKey.get(settingsDefinition.defaultComposeAccountId.key)
+    ),
     syncDeleteToRemote: readBoolean(
       byKey.get(settingsDefinition.syncDeleteToRemote.key),
       defaultSettings.syncDeleteToRemote
@@ -236,6 +242,11 @@ export function updateSettings(input: SettingsUpdateInput): AppSettings {
     settingsDefinition.updateCheckFrequency.key,
     next.updateCheckFrequency,
     settingsDefinition.updateCheckFrequency.type
+  )
+  writeSetting(
+    settingsDefinition.defaultComposeAccountId.key,
+    next.defaultComposeAccountId === null ? '' : String(next.defaultComposeAccountId),
+    settingsDefinition.defaultComposeAccountId.type
   )
   writeSetting(
     settingsDefinition.syncDeleteToRemote.key,
@@ -468,6 +479,11 @@ function ensureDefaultSettings(): void {
     settingsDefinition.updateCheckFrequency.key,
     defaultSettings.updateCheckFrequency,
     settingsDefinition.updateCheckFrequency.type
+  )
+  updateMissingSetting(
+    settingsDefinition.defaultComposeAccountId.key,
+    String(getFirstAccountId() ?? ''),
+    settingsDefinition.defaultComposeAccountId.type
   )
   updateMissingSetting(
     settingsDefinition.syncDeleteToRemote.key,
@@ -824,6 +840,14 @@ function validateSettings(settings: AppSettings): void {
   if (!['manual', 'daily', 'weekly'].includes(settings.updateCheckFrequency)) {
     throw new Error('不支持的更新检查频率。')
   }
+  if (
+    settings.defaultComposeAccountId !== null &&
+    !getDatabase()
+      .prepare('SELECT 1 FROM onemail_mail_accounts WHERE account_id = :accountId')
+      .get({ accountId: settings.defaultComposeAccountId })
+  ) {
+    throw new Error('选择的默认发件邮箱不存在。')
+  }
   if (!['none', 'system', 'custom'].includes(settings.globalProxyMode)) {
     throw new Error('不支持的全局代理模式。')
   }
@@ -835,7 +859,7 @@ function validateSettings(settings: AppSettings): void {
   }
 
   if (settings.globalProxyMode === 'custom') {
-    validateSocks5Url(settings.globalProxyUrl)
+    validateCustomProxyUrl(settings.globalProxyUrl)
   }
   if (
     settings.globalSignatureId !== null &&
@@ -847,23 +871,52 @@ function validateSettings(settings: AppSettings): void {
   }
 }
 
+function readDefaultComposeAccountId(row: SettingRow | undefined): number | null {
+  const storedAccountId = readNullableNumber(row)
+  if (
+    storedAccountId !== null &&
+    getDatabase()
+      .prepare('SELECT 1 FROM onemail_mail_accounts WHERE account_id = :accountId')
+      .get({ accountId: storedAccountId })
+  ) {
+    return storedAccountId
+  }
+
+  const fallbackAccountId = getFirstAccountId()
+  const fallbackValue = fallbackAccountId === null ? '' : String(fallbackAccountId)
+  if (!row || row.setting_value !== fallbackValue) {
+    writeSetting(
+      settingsDefinition.defaultComposeAccountId.key,
+      fallbackValue,
+      settingsDefinition.defaultComposeAccountId.type
+    )
+  }
+  return fallbackAccountId
+}
+
+function getFirstAccountId(): number | null {
+  const row = getDatabase()
+    .prepare<{
+      account_id: number
+    }>(
+      'SELECT account_id FROM onemail_mail_accounts ORDER BY sort_order ASC, account_id ASC LIMIT 1'
+    )
+    .get()
+  const accountId = Number(row?.account_id)
+  return Number.isInteger(accountId) && accountId > 0 ? accountId : null
+}
+
 function validateIntegerRange(value: number, min: number, max: number, label: string): void {
   if (!Number.isInteger(value) || value < min || value > max) {
     throw new Error(`${label}必须是 ${min} 到 ${max} 之间的整数。`)
   }
 }
 
-function validateSocks5Url(value?: string): void {
+function validateCustomProxyUrl(value?: string): void {
   const proxyUrl = value?.trim()
-  if (!proxyUrl) throw new Error('请输入 SOCKS5 代理地址。')
-  let parsed: URL
-  try {
-    parsed = new URL(proxyUrl)
-  } catch {
-    throw new Error('SOCKS5 代理地址格式无效。')
-  }
-  if (parsed.protocol !== 'socks5:' || !parsed.hostname || !parsed.port) {
-    throw new Error('SOCKS5 代理地址必须包含 socks5://、主机和端口。')
+  if (!proxyUrl) throw new Error('请输入自定义代理地址。')
+  if (!parseCustomProxyUrl(proxyUrl)) {
+    throw new Error('自定义代理必须是有效的 HTTP、HTTPS、SOCKS4、SOCKS4a、SOCKS5 或 SOCKS5h 地址。')
   }
 }
 

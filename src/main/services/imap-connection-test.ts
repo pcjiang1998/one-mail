@@ -2,18 +2,13 @@ import { Socket } from 'node:net'
 import { TLSSocket, connect as connectTls } from 'node:tls'
 import type { AccountCreateInput } from '../ipc/types'
 import { toImapConnectionError } from '../mail/imap-errors'
+import { formatImapIdCommand } from '../mail/imap-client-id'
 import { connectMailSocket } from './network-proxy'
 
 const CONNECTION_TIMEOUT_MS = 10000
 const OAUTH_IMAP_AUTH_RETRY_DELAYS_MS = [1200, 2500, 5000]
 
 type TestSocket = Socket | TLSSocket
-const CLIENT_ID = {
-  name: 'OneMail',
-  version: '1.0.0',
-  vendor: 'OneMail',
-  'support-email': 'support-onemail@huzhihui.com'
-}
 
 export async function testImapConnection(input: AccountCreateInput): Promise<boolean> {
   const email = input.email
@@ -344,11 +339,6 @@ function formatXOAuth2Payload(username: string, accessToken: string): string {
   return Buffer.from(`user=${username}\x01auth=Bearer ${accessToken}\x01\x01`, 'utf8').toString(
     'base64'
   )
-}
-
-function formatImapIdCommand(): string {
-  const values = Object.entries(CLIENT_ID).flatMap(([key, value]) => [key, value])
-  return `ID (${values.map(quoteAtom).join(' ')})`
 }
 
 function sanitizeImapResponse(value: string): string {

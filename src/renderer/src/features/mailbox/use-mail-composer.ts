@@ -5,13 +5,16 @@ import type { Account, Message } from '@renderer/components/mail/types'
 import {
   createComposeDraft,
   createBulkForwardComposeDraft,
+  onMailtoOpened,
   saveComposedDraft,
   sendComposedMessage,
+  takePendingMailtoRequests,
   type ComposeDraft,
   type ComposeKind,
   type OutboxMessage,
   type SendMessageInput
 } from '@renderer/lib/api'
+import type { MailtoComposeRequest } from '../../../../shared/types'
 import { useI18n } from '@renderer/lib/i18n'
 import { getErrorMessage } from './mailbox-utils'
 
@@ -23,10 +26,16 @@ type ComposerState = {
 type UseMailComposerInput = {
   accounts: Account[]
   selectedAccount: Account
+  defaultComposeAccountId: number | null
   setError: React.Dispatch<React.SetStateAction<string | null>>
 }
 
-export function useMailComposer({ accounts, selectedAccount, setError }: UseMailComposerInput): {
+export function useMailComposer({
+  accounts,
+  selectedAccount,
+  defaultComposeAccountId,
+  setError
+}: UseMailComposerInput): {
   composerOpen: boolean
   composerDraft: ComposeDraft | null
   composerPending: boolean
@@ -41,7 +50,54 @@ export function useMailComposer({ accounts, selectedAccount, setError }: UseMail
   const { t } = useI18n()
   const [composer, setComposer] = React.useState<ComposerState>({ open: false, draft: null })
   const forwardDraftQueueRef = React.useRef<ComposeDraft[]>([])
+  const mailtoOpeningRef = React.useRef(false)
   const [composerPending, setComposerPending] = React.useState(false)
+
+  const openPendingMailtoRequests = React.useCallback(async (): Promise<void> => {
+    const accountId = getMailtoAccountId(accounts, defaultComposeAccountId)
+    if (!accountId || mailtoOpeningRef.current) return
+
+    mailtoOpeningRef.current = true
+    try {
+      const requests = await takePendingMailtoRequests()
+      if (requests.length === 0) return
+
+      setComposerPending(true)
+      setError(null)
+      const drafts: ComposeDraft[] = []
+      for (const request of requests) {
+        const draft = await createComposeDraft({ kind: 'new', accountId })
+        drafts.push(applyMailtoRequest(draft, request, accountId))
+      }
+
+      const [first, ...remaining] = drafts
+      forwardDraftQueueRef.current = remaining
+      if (first) setComposer({ open: true, draft: first })
+    } catch (composeError) {
+      const errorMessage = getErrorMessage(composeError, t('mail.composer.createDraftError'))
+      setError(errorMessage)
+      toast.error(errorMessage)
+    } finally {
+      mailtoOpeningRef.current = false
+      setComposerPending(false)
+    }
+  }, [accounts, defaultComposeAccountId, setError, t])
+
+  React.useEffect(() => {
+    if (!getMailtoAccountId(accounts, defaultComposeAccountId)) return undefined
+
+    const initialOpenTimer = window.setTimeout(() => {
+      void openPendingMailtoRequests()
+    }, 0)
+    const unsubscribe = onMailtoOpened(() => {
+      void openPendingMailtoRequests()
+    })
+
+    return () => {
+      window.clearTimeout(initialOpenTimer)
+      unsubscribe()
+    }
+  }, [accounts, defaultComposeAccountId, openPendingMailtoRequests])
 
   const openComposer = React.useCallback(
     async (kind: ComposeKind, message?: Message): Promise<void> => {
@@ -237,6 +293,41 @@ function getComposeAccountId(
   if (message?.accountId) return message.accountId
   if (selectedAccount.accountId) return selectedAccount.accountId
   return accounts.find((account) => account.accountId)?.accountId
+}
+
+function getMailtoAccountId(
+  accounts: Account[],
+  defaultComposeAccountId: number | null
+): number | undefined {
+  const sendingAccounts = accounts.filter(
+    (account) => account.accountId !== undefined && account.smtpEnabled !== false
+  )
+  return (
+    sendingAccounts.find((account) => account.accountId === defaultComposeAccountId)?.accountId ??
+    sendingAccounts[0]?.accountId
+  )
+}
+
+function applyMailtoRequest(
+  draft: ComposeDraft,
+  request: MailtoComposeRequest,
+  accountId: number
+): ComposeDraft {
+  const bodyText =
+    request.body && draft.bodyText
+      ? `${request.body}\n\n${draft.bodyText}`
+      : request.body || draft.bodyText
+
+  return {
+    ...draft,
+    kind: 'new',
+    accountId,
+    to: request.to,
+    cc: request.cc,
+    bcc: request.bcc,
+    subject: request.subject,
+    bodyText
+  }
 }
 
 function prepareDraft(

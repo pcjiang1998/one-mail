@@ -1,8 +1,9 @@
 import { Buffer } from 'node:buffer'
-import { Socket, connect as connectTcp } from 'node:net'
+import { Socket, connect as connectTcp, isIP } from 'node:net'
 import { TLSSocket, connect as connectTls } from 'node:tls'
 import { session } from 'electron'
 import type { AccountProxyMode, ProxyMode } from '../../shared/types'
+import { parseCustomProxyUrl } from '../../shared/proxy-url'
 import { getSettings } from '../db/repositories/settings.repository'
 
 type ProxyAccount = {
@@ -13,8 +14,9 @@ type ProxyAccount = {
 type ProxyTarget = { host: string; port: number }
 type ProxyDescriptor =
   | { mode: 'direct' }
+  | { mode: 'socks4'; url: URL }
   | { mode: 'socks5'; url: URL }
-  | { mode: 'http'; host: string; port: number; auth?: string }
+  | { mode: 'http'; url: URL }
 
 const CONNECTION_TIMEOUT_MS = 15000
 
@@ -24,17 +26,7 @@ export async function connectMailSocket(
   port: number,
   secure: boolean
 ): Promise<Socket | TLSSocket> {
-  const descriptor = await resolveProxyDescriptor(account, { host, port })
-  if (descriptor.mode === 'direct') {
-    return secure ? connectDirectTls(host, port) : connectDirectTcp(host, port)
-  }
-
-  const tunnel =
-    descriptor.mode === 'socks5'
-      ? await connectSocks5(descriptor.url, { host, port })
-      : await connectHttpProxy(descriptor, { host, port })
-  if (!secure) return tunnel
-  return upgradeTunnelToTls(tunnel, host)
+  return connectWithProxyFallback(account, { host, port }, secure)
 }
 
 export async function connectMailTunnel(
@@ -42,90 +34,149 @@ export async function connectMailTunnel(
   host: string,
   port: number
 ): Promise<Socket> {
-  const descriptor = await resolveProxyDescriptor(account, { host, port })
-  if (descriptor.mode === 'direct') return connectDirectTcp(host, port)
-  return descriptor.mode === 'socks5'
-    ? connectSocks5(descriptor.url, { host, port })
-    : connectHttpProxy(descriptor, { host, port })
+  return connectWithProxyFallback(account, { host, port }, false)
 }
 
-export function validateSocks5ProxyUrl(value?: string): string | undefined {
-  const text = value?.trim()
-  if (!text) return undefined
-  const url = new URL(text)
-  if (url.protocol !== 'socks5:' || !url.hostname || !url.port) {
-    throw new Error('自定义代理必须是 socks5://主机:端口 格式。')
-  }
-  const port = Number(url.port)
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error('SOCKS5 代理端口无效。')
+export function validateCustomProxyUrl(value?: string): string | undefined {
+  if (!value?.trim()) return undefined
+  const url = parseCustomProxyUrl(value)
+  if (!url) {
+    throw new Error(
+      '自定义代理必须是有效的 http://、https://、socks4://、socks4a://、socks5:// 或 socks5h:// 地址。'
+    )
   }
   return url.toString()
 }
 
-async function resolveProxyDescriptor(
+async function connectWithProxyFallback(
+  account: ProxyAccount,
+  target: ProxyTarget,
+  secure: boolean
+): Promise<Socket | TLSSocket> {
+  const descriptors = await resolveProxyDescriptors(account, target)
+  let lastError: unknown
+
+  for (const descriptor of descriptors) {
+    try {
+      if (descriptor.mode === 'direct') {
+        return secure
+          ? await connectDirectTls(target.host, target.port)
+          : await connectDirectTcp(target.host, target.port)
+      }
+
+      const tunnel = await connectProxyTunnel(descriptor, target)
+      return secure ? await upgradeTunnelToTls(tunnel, target.host) : tunnel
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('无法连接邮件服务器或代理。')
+}
+
+function connectProxyTunnel(
+  descriptor: Exclude<ProxyDescriptor, { mode: 'direct' }>,
+  target: ProxyTarget
+): Promise<Socket> {
+  if (descriptor.mode === 'socks4') return connectSocks4(descriptor.url, target)
+  if (descriptor.mode === 'socks5') return connectSocks5(descriptor.url, target)
+  return connectHttpProxy(descriptor.url, target)
+}
+
+async function resolveProxyDescriptors(
   account: ProxyAccount,
   target: ProxyTarget
-): Promise<ProxyDescriptor> {
+): Promise<ProxyDescriptor[]> {
   const settings = getSettings()
   const accountMode = account.proxyMode ?? 'global'
   const mode: ProxyMode = accountMode === 'global' ? settings.globalProxyMode : accountMode
   const customUrl = accountMode === 'global' ? settings.globalProxyUrl : account.customProxyUrl
 
-  if (mode === 'none') return { mode: 'direct' }
+  if (mode === 'none') return [{ mode: 'direct' }]
   if (mode === 'custom') {
-    const value = validateSocks5ProxyUrl(customUrl)
-    if (!value) throw new Error('尚未配置 SOCKS5 代理地址。')
-    return { mode: 'socks5', url: new URL(value) }
+    const value = validateCustomProxyUrl(customUrl)
+    if (!value) throw new Error('尚未配置自定义代理地址。')
+    return [descriptorFromUrl(new URL(value))]
   }
 
   const rules = await session.defaultSession.resolveProxy(`https://${target.host}:${target.port}`)
-  return parseSystemProxyRule(rules)
+  return parseSystemProxyRules(rules)
 }
 
-function parseSystemProxyRule(value: string): ProxyDescriptor {
+function parseSystemProxyRules(value: string): ProxyDescriptor[] {
+  const descriptors: ProxyDescriptor[] = []
   for (const rawRule of value.split(';')) {
     const [kind = '', address = ''] = rawRule.trim().split(/\s+/, 2)
     const normalizedKind = kind.toUpperCase()
-    if (!normalizedKind || normalizedKind === 'DIRECT') return { mode: 'direct' }
+    if (!normalizedKind) continue
+    if (normalizedKind === 'DIRECT') {
+      descriptors.push({ mode: 'direct' })
+      continue
+    }
+    if (normalizedKind === 'SOCKS4') {
+      descriptors.push({ mode: 'socks4', url: new URL(`socks4://${address}`) })
+      continue
+    }
     if (normalizedKind === 'SOCKS5' || normalizedKind === 'SOCKS') {
-      return { mode: 'socks5', url: new URL(`socks5://${address}`) }
+      descriptors.push({ mode: 'socks5', url: new URL(`socks5://${address}`) })
+      continue
     }
     if (['PROXY', 'HTTP', 'HTTPS'].includes(normalizedKind)) {
-      const { host, port } = parseHostPort(address)
-      return { mode: 'http', host, port }
+      const protocol = normalizedKind === 'HTTPS' ? 'https' : 'http'
+      descriptors.push({ mode: 'http', url: new URL(`${protocol}://${address}`) })
     }
   }
-  return { mode: 'direct' }
+  return descriptors.length > 0 ? descriptors : [{ mode: 'direct' }]
 }
 
-function parseHostPort(value: string): ProxyTarget {
-  const url = new URL(`http://${value}`)
-  const port = Number(url.port || 80)
-  if (!url.hostname || !Number.isInteger(port)) throw new Error('系统代理地址无效。')
-  return { host: url.hostname, port }
+function descriptorFromUrl(url: URL): Exclude<ProxyDescriptor, { mode: 'direct' }> {
+  if (url.protocol === 'socks4:' || url.protocol === 'socks4a:') {
+    return { mode: 'socks4', url }
+  }
+  if (url.protocol === 'socks5:' || url.protocol === 'socks5h:') {
+    return { mode: 'socks5', url }
+  }
+  return { mode: 'http', url }
 }
 
 async function connectDirectTcp(host: string, port: number): Promise<Socket> {
   const socket = connectTcp({ host, port })
-  await waitForSocket(socket, 'connect')
-  return socket
+  keepSocketErrorsHandled(socket)
+  try {
+    await waitForSocket(socket, 'connect')
+    return socket
+  } catch (error) {
+    socket.destroy()
+    throw error
+  }
 }
 
 async function connectDirectTls(host: string, port: number): Promise<TLSSocket> {
   const socket = connectTls({ host, port, servername: host, rejectUnauthorized: true })
-  await waitForSocket(socket, 'secureConnect')
-  return socket
+  keepSocketErrorsHandled(socket)
+  try {
+    await waitForSocket(socket, 'secureConnect')
+    return socket
+  } catch (error) {
+    socket.destroy()
+    throw error
+  }
 }
 
 async function upgradeTunnelToTls(socket: Socket, servername: string): Promise<TLSSocket> {
   const tlsSocket = connectTls({ socket, servername, rejectUnauthorized: true })
-  await waitForSocket(tlsSocket, 'secureConnect')
-  return tlsSocket
+  keepSocketErrorsHandled(tlsSocket)
+  try {
+    await waitForSocket(tlsSocket, 'secureConnect')
+    return tlsSocket
+  } catch (error) {
+    tlsSocket.destroy()
+    throw error
+  }
 }
 
 async function connectSocks5(proxy: URL, target: ProxyTarget): Promise<Socket> {
-  const socket = await connectDirectTcp(proxy.hostname, Number(proxy.port))
+  const socket = await connectDirectTcp(proxy.hostname, getProxyPort(proxy))
   try {
     const username = decodeURIComponent(proxy.username)
     const password = decodeURIComponent(proxy.password)
@@ -170,26 +221,82 @@ async function connectSocks5(proxy: URL, target: ProxyTarget): Promise<Socket> {
   }
 }
 
-async function connectHttpProxy(
-  proxy: Extract<ProxyDescriptor, { mode: 'http' }>,
-  target: ProxyTarget
-): Promise<Socket> {
-  const socket = await connectDirectTcp(proxy.host, proxy.port)
-  const authority = `${target.host}:${target.port}`
-  const headers = [
-    `CONNECT ${authority} HTTP/1.1`,
-    `Host: ${authority}`,
-    'Proxy-Connection: Keep-Alive'
-  ]
-  if (proxy.auth)
-    headers.push(`Proxy-Authorization: Basic ${Buffer.from(proxy.auth).toString('base64')}`)
-  socket.write(`${headers.join('\r\n')}\r\n\r\n`)
-  const response = await readUntil(socket, Buffer.from('\r\n\r\n'))
-  if (!/^HTTP\/1\.[01] 2\d\d\b/i.test(response.toString('latin1'))) {
+async function connectSocks4(proxy: URL, target: ProxyTarget): Promise<Socket> {
+  const socket = await connectDirectTcp(proxy.hostname, getProxyPort(proxy))
+  try {
+    const userId = Buffer.from(decodeURIComponent(proxy.username), 'utf8')
+    const targetAddress = isIP(target.host) === 4 ? parseIpv4(target.host) : undefined
+    if (!targetAddress && proxy.protocol === 'socks4:') {
+      throw new Error('SOCKS4 代理仅支持 IPv4 目标；域名目标请使用 socks4a://。')
+    }
+
+    const port = Buffer.from([(target.port >> 8) & 0xff, target.port & 0xff])
+    const request = targetAddress
+      ? Buffer.concat([Buffer.from([0x04, 0x01]), port, targetAddress, userId, Buffer.from([0x00])])
+      : Buffer.concat([
+          Buffer.from([0x04, 0x01]),
+          port,
+          Buffer.from([0x00, 0x00, 0x00, 0x01]),
+          userId,
+          Buffer.from([0x00]),
+          Buffer.from(target.host, 'utf8'),
+          Buffer.from([0x00])
+        ])
+    socket.write(request)
+    const response = await readExactly(socket, 8)
+    if (response[1] !== 0x5a) {
+      throw new Error(`SOCKS4 代理连接目标服务器失败（代码 ${response[1]}）。`)
+    }
+    return socket
+  } catch (error) {
+    socket.destroy()
+    throw error
+  }
+}
+
+async function connectHttpProxy(proxy: URL, target: ProxyTarget): Promise<Socket> {
+  const socket =
+    proxy.protocol === 'https:'
+      ? await connectDirectTls(proxy.hostname, getProxyPort(proxy))
+      : await connectDirectTcp(proxy.hostname, getProxyPort(proxy))
+  try {
+    const authority = `${target.host}:${target.port}`
+    const headers = [
+      `CONNECT ${authority} HTTP/1.1`,
+      `Host: ${authority}`,
+      'Proxy-Connection: Keep-Alive'
+    ]
+    if (proxy.username) {
+      const auth = `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`
+      headers.push(`Proxy-Authorization: Basic ${Buffer.from(auth).toString('base64')}`)
+    }
+    socket.write(`${headers.join('\r\n')}\r\n\r\n`)
+    const response = await readUntil(socket, Buffer.from('\r\n\r\n'))
+    if (/^HTTP\/1\.[01] 2\d\d\b/i.test(response.toString('latin1'))) return socket
+
     socket.destroy()
     throw new Error('系统 HTTP 代理拒绝连接邮件服务器。')
+  } catch (error) {
+    socket.destroy()
+    throw error
   }
-  return socket
+}
+
+function getProxyPort(proxy: URL): number {
+  const fallback = proxy.protocol === 'http:' ? 80 : proxy.protocol === 'https:' ? 443 : 1080
+  const port = Number(proxy.port || fallback)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error('代理端口无效。')
+  }
+  return port
+}
+
+function parseIpv4(address: string): Buffer {
+  return Buffer.from(address.split('.').map(Number))
+}
+
+function keepSocketErrorsHandled(socket: Socket | TLSSocket): void {
+  socket.on('error', () => undefined)
 }
 
 function waitForSocket(

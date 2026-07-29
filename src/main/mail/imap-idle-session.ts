@@ -3,6 +3,7 @@ import { TLSSocket, connect as connectTls } from 'node:tls'
 import type { getAccount } from '../db/repositories/account.repository'
 import { connectMailSocket } from '../services/network-proxy'
 import { toImapConnectionError } from './imap-errors'
+import { formatImapIdCommand } from './imap-client-id'
 
 type TestSocket = Socket | TLSSocket
 type ImapAccount = NonNullable<ReturnType<typeof getAccount>>
@@ -22,6 +23,16 @@ export type IdleWatchMailbox = {
 type IdleResult = {
   changed: boolean
   reason: 'exists' | 'expunge' | 'fetch' | 'recent' | 'timeout' | 'closed'
+}
+
+export class ImapIdleRuntimeError extends Error {
+  constructor(
+    message: string,
+    readonly rejected: boolean
+  ) {
+    super(message)
+    this.name = 'ImapIdleRuntimeError'
+  }
 }
 
 const CONNECTION_TIMEOUT_MS = 15000
@@ -114,12 +125,20 @@ export class ImapIdleSession {
   }
 
   async idle(timeoutMs: number): Promise<IdleResult> {
-    this.assertSocketHealthy()
-    const tag = this.nextTag()
-    await writeLine(this.socket, `${tag} IDLE`)
-    await this.waitForIdleContinuation()
+    try {
+      this.assertSocketHealthy()
+      const tag = this.nextTag()
+      await writeLine(this.socket, `${tag} IDLE`)
+      await this.waitForIdleContinuation(tag)
 
-    return waitForIdleChange(this.socket, tag, timeoutMs)
+      return await waitForIdleChange(this.socket, tag, timeoutMs)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new ImapIdleRuntimeError(
+        `IMAP IDLE 不可用：${message}`,
+        /IDLE_REJECTED|\b(NO|BAD)\b/i.test(message)
+      )
+    }
   }
 
   async logout(): Promise<void> {
@@ -145,11 +164,14 @@ export class ImapIdleSession {
     })
   }
 
-  private async waitForIdleContinuation(): Promise<void> {
+  private async waitForIdleContinuation(tag: string): Promise<void> {
     await waitForLine(this.socket, (line) => {
       if (/^\+\s/.test(line)) return true
       if (/^\*\s+BYE\b/i.test(line)) {
         throw new Error(`IMAP 连接已断开：${line}`)
+      }
+      if (new RegExp(`^${tag}\\s+(NO|BAD)\\b`, 'i').test(line)) {
+        throw new Error(`IDLE_REJECTED ${sanitizeImapResponse(line)}`)
       }
       return false
     })
@@ -264,7 +286,7 @@ function waitForIdleChange(
     }
 
     function handleClose(): void {
-      finish({ changed: false, reason: 'closed' })
+      fail(new Error('IMAP IDLE 连接已断开。'))
     }
 
     socket.on('data', handleData)
@@ -417,18 +439,6 @@ function decodeUtf16BigEndian(buffer: Buffer): string {
   }
 
   return result
-}
-
-const CLIENT_ID = {
-  name: 'OneMail',
-  version: '1.0.0',
-  vendor: 'OneMail',
-  'support-email': 'support@onemail.local'
-}
-
-function formatImapIdCommand(): string {
-  const values = Object.entries(CLIENT_ID).flatMap(([key, value]) => [key, value])
-  return `ID (${values.map(quoteAtom).join(' ')})`
 }
 
 function sanitizeImapResponse(value: string): string {

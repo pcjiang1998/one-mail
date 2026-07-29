@@ -224,6 +224,7 @@ export function MailboxWorkspace(): React.JSX.Element {
   } = useMailComposer({
     accounts,
     selectedAccount,
+    defaultComposeAccountId: settings?.defaultComposeAccountId ?? null,
     setError
   })
   const routeAccountId = normalizeRouteId(routeParams.accountId)
@@ -512,6 +513,7 @@ export function MailboxWorkspace(): React.JSX.Element {
     if (!account.accountId) return
     setError(null)
     await removeAccount(account.accountId)
+    setSettings(await saveSettings({}))
     const nextAccounts = await loadAccounts()
     const nextSelectedAccountId = getNextSelectedAccountId(
       nextAccounts,
@@ -1006,6 +1008,7 @@ export function MailboxWorkspace(): React.JSX.Element {
         settings={settings}
         accountCount={realAccounts.length}
         messageCount={selectedAccount.messageCount ?? messages.length}
+        unreadCount={realAccounts.reduce((sum, account) => sum + account.unread, 0)}
         syncNotice={syncNotice}
       />
 

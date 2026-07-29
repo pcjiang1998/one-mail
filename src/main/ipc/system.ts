@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { getDatabasePath } from '../db/connection'
+import { takePendingMailtoRequests } from '../services/mailto'
 import type { AppTheme, SystemInfo } from './types'
 
 const TITLE_BAR_SYMBOL_COLORS: Record<AppTheme, string> = {
@@ -51,4 +52,6 @@ export function registerSystemIpc(): void {
     await shell.openExternal(url.toString())
     return true
   })
+
+  ipcMain.handle('system/takePendingMailtoRequests', () => takePendingMailtoRequests())
 }

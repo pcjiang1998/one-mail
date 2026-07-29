@@ -32,6 +32,7 @@ import type {
   MessageFilterTag,
   MessageListQuery,
   MailboxChangedEvent,
+  MailtoComposeRequest,
   OutboxMessage as SharedOutboxMessage,
   SettingsUpdateInput,
   SyncMode,
@@ -347,6 +348,14 @@ export async function revealPathInFileManager(path: string): Promise<boolean> {
 
 export async function openExternalUrl(url: string): Promise<boolean> {
   return window.api.system.openExternal(url)
+}
+
+export async function takePendingMailtoRequests(): Promise<MailtoComposeRequest[]> {
+  return window.api.system.takePendingMailtoRequests()
+}
+
+export function onMailtoOpened(callback: () => void): () => void {
+  return window.api.system.onMailtoOpened(callback)
 }
 
 export async function checkForAppUpdates(): Promise<AppUpdateCheckResult> {

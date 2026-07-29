@@ -1,5 +1,9 @@
 appId: com.pcjiang1998.onemailnext
 productName: OneMail Next
+protocols:
+  - name: OneMail Next mail handler
+    schemes:
+      - mailto
 directories:
   buildResources: build
 files:

@@ -151,6 +151,11 @@ const sections: Array<{
   icon: React.ComponentType<React.SVGProps<SVGSVGElement>>
 }> = [
   {
+    value: 'general',
+    labelKey: 'settings.general',
+    icon: RefreshCcw
+  },
+  {
     value: 'accounts',
     labelKey: 'settings.accounts',
     icon: Mails
@@ -161,9 +166,9 @@ const sections: Array<{
     icon: Settings2
   },
   {
-    value: 'general',
-    labelKey: 'settings.general',
-    icon: RefreshCcw
+    value: 'sync',
+    labelKey: 'settings.sync',
+    icon: Clock3
   },
   {
     value: 'signatures',
@@ -174,11 +179,6 @@ const sections: Array<{
     value: 'network',
     labelKey: 'settings.network',
     icon: Network
-  },
-  {
-    value: 'sync',
-    labelKey: 'settings.sync',
-    icon: Clock3
   },
   {
     value: 'translation',
@@ -202,7 +202,7 @@ export function SettingsDialog({
   settings,
   systemInfo,
   updateStatus,
-  initialSection = 'accounts',
+  initialSection = 'general',
   onOpenChange,
   onSubmit,
   onImported,
@@ -214,7 +214,7 @@ export function SettingsDialog({
 }: SettingsDialogProps): React.JSX.Element {
   const { t } = useI18n()
   const settingsSchema = React.useMemo(() => createSettingsSchema(t), [t])
-  const [section, setSection] = React.useState<SettingsSection>('accounts')
+  const [section, setSection] = React.useState<SettingsSection>('general')
   const [pending, setPending] = React.useState(false)
   const [backupPending, setBackupPending] = React.useState<BackupPending>(null)
   const [backupImportDialogOpen, setBackupImportDialogOpen] = React.useState(false)
@@ -377,7 +377,7 @@ export function SettingsDialog({
       setError(null)
       setBackupError(null)
       setBackupMessage(null)
-      setSection('accounts')
+      setSection('general')
     }
     onOpenChange(nextOpen)
   }
@@ -519,6 +519,10 @@ export function SettingsDialog({
             {section === 'accounts' ? (
               <AccountManagementSettings
                 accounts={accounts}
+                defaultComposeAccountId={settings?.defaultComposeAccountId ?? null}
+                onDefaultComposeAccountChange={(accountId) =>
+                  onSubmit({ defaultComposeAccountId: accountId })
+                }
                 onRemoveAccounts={onRemoveAccounts}
                 onReorderAccounts={onReorderAccounts}
               />

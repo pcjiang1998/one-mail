@@ -9,6 +9,7 @@ import type {
   SignatureMode,
   SmtpSecurity
 } from '../../../../shared/types'
+import { isValidCustomProxyUrl } from '../../../../shared/proxy-url'
 
 export const accountKinds = [
   'gmail',
@@ -454,7 +455,7 @@ export function createAccountSchema(
         })
       }
 
-      if (value.proxyMode === 'custom' && !isValidSocks5Url(value.customProxyUrl)) {
+      if (value.proxyMode === 'custom' && !isValidCustomProxyUrl(value.customProxyUrl)) {
         context.addIssue({
           code: 'custom',
           path: ['customProxyUrl'],
@@ -520,15 +521,6 @@ export const defaultAccountFormValues: AccountFormValues = {
   proxyMode: 'global',
   customProxyUrl: '',
   signatureMode: 'global'
-}
-
-function isValidSocks5Url(value?: string): boolean {
-  try {
-    const url = new URL(value ?? '')
-    return url.protocol === 'socks5:' && Boolean(url.hostname) && Boolean(url.port)
-  } catch {
-    return false
-  }
 }
 
 export function getProviderPreset(kind: AccountKind): ProviderPreset {

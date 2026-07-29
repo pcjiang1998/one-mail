@@ -12,6 +12,7 @@ import { isImapAuthErrorMessage } from '../mail/imap-errors'
 import { syncAccountNewInboxMessages } from '../mail/imap-sync'
 import {
   ImapIdleSession,
+  ImapIdleRuntimeError,
   type IdleMailboxStatus,
   type IdleWatchMailbox
 } from '../mail/imap-idle-session'
@@ -26,6 +27,7 @@ type WatchTask = {
   session?: ImapIdleSession
   retryCount: number
   failureCount: number
+  idleFailureCount: number
   lastWarningKey?: string
   watchMailboxes: IdleWatchMailbox[]
   lastStatuses: Map<string, IdleMailboxStatus>
@@ -147,6 +149,7 @@ export function refreshMailboxWatchers(): void {
       stopped: false,
       retryCount: 0,
       failureCount: 0,
+      idleFailureCount: 0,
       lastWarningKey: undefined,
       watchMailboxes: [{ path: 'INBOX', role: 'inbox' }],
       lastStatuses: new Map()
@@ -219,6 +222,20 @@ async function runMailboxWatcher(task: WatchTask): Promise<void> {
     } catch (error) {
       if (!task.stopped) {
         const message = error instanceof Error ? error.message : '邮箱监听失败。'
+        if (error instanceof ImapIdleRuntimeError) {
+          task.idleFailureCount += 1
+          if (error.rejected || task.idleFailureCount >= 3) {
+            console.warn(
+              `[mailbox-watch] account ${task.accountId}: IMAP IDLE unavailable at runtime; switching to fallback. ${message}`
+            )
+            updateAccountIdleSupport(task.accountId, false)
+            task.stopped = true
+            tasks.delete(task.accountId)
+            refreshForegroundSyncTimer()
+            requestForegroundMailboxSync('interval')
+            return
+          }
+        }
         warnWatchFailure(task, message)
         if (isImapAuthErrorMessage(message)) {
           markAccountAuthError(task.accountId, message)
@@ -259,6 +276,7 @@ function suspendMailboxWatcher(task: WatchTask, reason: WatchSuspensionReason): 
 async function runIdleLoop(task: WatchTask, session: ImapIdleSession): Promise<void> {
   while (!task.stopped) {
     const idleResult = await session.idle(IDLE_REFRESH_MS)
+    task.idleFailureCount = 0
     if (task.stopped) return
 
     if (idleResult.changed) {

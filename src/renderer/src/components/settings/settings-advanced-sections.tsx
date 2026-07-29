@@ -28,6 +28,7 @@ import type {
   SettingsUpdateInput,
   SignatureMode
 } from '../../../../shared/types'
+import { isValidCustomProxyUrl } from '../../../../shared/proxy-url'
 
 const CACHE_CLEANUP_DAYS = [7, 15, 30, 60, 90, 180, 360] as const
 const PROXY_MODES: ProxyMode[] = ['none', 'system', 'custom']
@@ -357,7 +358,7 @@ export function NetworkSettings({
   const [error, setError] = React.useState<string | null>(null)
 
   async function saveGlobal(nextMode: ProxyMode, nextUrl = url): Promise<void> {
-    if (nextMode === 'custom' && !isValidSocks5Url(nextUrl)) {
+    if (nextMode === 'custom' && !isValidCustomProxyUrl(nextUrl)) {
       setError(t('account.form.invalidProxyUrl'))
       return
     }
@@ -446,7 +447,7 @@ function AccountProxyRow({
 
   async function save(nextMode: AccountProxyMode, nextUrl = url): Promise<void> {
     if (!account.accountId) return
-    if (nextMode === 'custom' && !isValidSocks5Url(nextUrl)) {
+    if (nextMode === 'custom' && !isValidCustomProxyUrl(nextUrl)) {
       setError(t('account.form.invalidProxyUrl'))
       return
     }
@@ -838,13 +839,4 @@ function normalizeAccountSyncMode(
 
 function isValidInterval(value: number): boolean {
   return Number.isInteger(value) && value >= 1 && value <= 1440
-}
-
-function isValidSocks5Url(value: string): boolean {
-  try {
-    const url = new URL(value.trim())
-    return url.protocol === 'socks5:' && Boolean(url.hostname) && Boolean(url.port)
-  } catch {
-    return false
-  }
 }

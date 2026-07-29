@@ -462,6 +462,7 @@ export type AppSettings = {
   locale: string
   theme: AppColorTheme
   updateCheckFrequency: UpdateCheckFrequency
+  defaultComposeAccountId: number | null
   syncDeleteToRemote: boolean
   globalProxyMode: ProxyMode
   globalProxyUrl?: string
@@ -471,6 +472,14 @@ export type AppSettings = {
   fallbackSyncMode: FallbackSyncMode
   fallbackSyncIntervalMinutes: number
   signatures: MailSignature[]
+}
+
+export type MailtoComposeRequest = {
+  to: string[]
+  cc: string[]
+  bcc: string[]
+  subject: string
+  body: string
 }
 
 export type SettingsUpdateInput = Partial<AppSettings>
@@ -766,5 +775,7 @@ export type OneMailApi = {
     revealDatabase: () => Promise<boolean>
     revealPath: (path: string) => Promise<boolean>
     openExternal: (url: string) => Promise<boolean>
+    takePendingMailtoRequests: () => Promise<MailtoComposeRequest[]>
+    onMailtoOpened: (callback: () => void) => () => void
   }
 }
