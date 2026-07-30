@@ -1,9 +1,7 @@
 import { getAccount } from '../db/repositories/account.repository'
-import { getSettings } from '../db/repositories/settings.repository'
 import {
   getMessageDeleteTarget,
   markMessageDeleteError,
-  markMessageMovedToTrash,
   markMessageRemoteDeleted,
   restoreMessageLocally,
   markMessageUserHidden,
@@ -88,57 +86,7 @@ export async function deleteMessageToTrash(messageId: number): Promise<MessageDe
     return permanentlyDeleteMessage(messageId)
   }
 
-  if (!shouldSyncDeleteToRemote(target)) {
-    return hideMessageLocally(messageId)
-  }
-
-  const account = getAccount(target.accountId)
-  if (!account) throw new Error(`Account not found: ${target.accountId}`)
-  if (account.receiveProtocol === 'pop3') return hideMessageLocally(messageId)
-  const trash = findFolderByRole(target.accountId, 'trash')
-  const client = await SimpleImapSession.connect(account, 'T')
-
-  try {
-    await authenticateImapSession(account, client)
-    const capabilities = await client.capability().catch(() => new Set<string>())
-    await client.selectMailbox(target.folderPath)
-
-    if (trash && trash.folderId !== target.folderId) {
-      let destinationUid: number | undefined
-      if (capabilities.has('MOVE')) {
-        destinationUid = await client.uidMove(target.uid, trash.path)
-      } else {
-        destinationUid = await client.uidCopy(target.uid, trash.path)
-        await client.setDeletedFlag(target.uid, true)
-        await client.expunge()
-      }
-      markMessageMovedToTrash(messageId, trash.folderId, destinationUid)
-    } else {
-      await client.setDeletedFlag(target.uid, true)
-      await client.expunge()
-      markMessageRemoteDeleted(messageId)
-      return {
-        messageId,
-        accountId: target.accountId,
-        folderId: target.folderId,
-        action: 'permanent_delete',
-        localOnly: false
-      }
-    }
-
-    return {
-      messageId,
-      accountId: target.accountId,
-      folderId: target.folderId,
-      action: 'trash',
-      localOnly: false
-    }
-  } catch (error) {
-    markMessageDeleteError(messageId, getErrorMessage(error))
-    throw error
-  } finally {
-    await client.logout().catch(() => undefined)
-  }
+  return hideMessageLocally(messageId)
 }
 
 async function resolvePermanentDeleteLocation(
@@ -284,19 +232,10 @@ function isTrashTarget(target: MessageDeleteTarget): boolean {
   return target.folderRole === 'trash' || detectSpecialFolderRole(target.folderPath) === 'trash'
 }
 
-function shouldSyncDeleteToRemote(target: MessageDeleteTarget): boolean {
-  const account = getAccount(target.accountId)
-  if (!account) return getSettings().syncDeleteToRemote
-  if (account.receiveProtocol === 'pop3') return false
-  if (account.remoteDeletePolicy === 'enabled') return true
-  if (account.remoteDeletePolicy === 'disabled') return false
-  return getSettings().syncDeleteToRemote
-}
-
 function requiresPermanentRemoteDelete(target: MessageDeleteTarget): boolean {
   if (target.userHidden) return true
   const role = detectSpecialFolderRole(target.folderPath) ?? target.folderRole
-  return role === 'sent' || role === 'drafts' || role === 'junk' || role === 'trash'
+  return role === 'sent' || role === 'drafts' || role === 'junk'
 }
 
 function uniqueMessageIds(messageIds: number[]): number[] {

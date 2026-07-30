@@ -93,8 +93,11 @@ export function registerAccountIpc(): void {
 
     if (!requiresConnectionTest(input)) {
       const account = updateAccount(input)
+      if (input.selectedFolderPaths) {
+        await updateAccountFolderSelection(account.accountId, input.selectedFolderPaths)
+      }
       refreshMailboxWatchers()
-      return account
+      return getAccount(account.accountId) ?? account
     }
 
     if (current.authType === 'oauth2' || input.authType === 'oauth2') {
@@ -103,7 +106,7 @@ export function registerAccountIpc(): void {
         await updateAccountFolderSelection(account.accountId, input.selectedFolderPaths)
       }
       refreshMailboxWatchers()
-      return account
+      return getAccount(account.accountId) ?? account
     }
 
     const password = input.password ?? readAccountPassword(input.accountId)
@@ -142,7 +145,7 @@ export function registerAccountIpc(): void {
       await updateAccountFolderSelection(account.accountId, input.selectedFolderPaths)
     }
     refreshMailboxWatchers()
-    return account
+    return getAccount(account.accountId) ?? account
   })
   ipcMain.handle('accounts/reauthorize', async (_event, accountId: number) => {
     const current = getAccount(accountId)

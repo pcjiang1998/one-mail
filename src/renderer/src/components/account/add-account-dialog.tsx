@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as React from 'react'
-import { Controller, useForm } from 'react-hook-form'
+import { useForm } from 'react-hook-form'
 
 import { ResponsiveDialog } from '@renderer/components/responsive-dialog'
 import { Alert, AlertDescription } from '@renderer/components/ui/alert'
@@ -8,6 +8,7 @@ import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { FieldError, FieldGroup } from '@renderer/components/ui/field'
 import { useI18n } from '@renderer/lib/i18n'
+import { cn } from '@renderer/lib/utils'
 import {
   Select,
   SelectContent,
@@ -83,6 +84,9 @@ export function AddAccountForm({
     form.setValue('imapHost', preset.imapHost)
     form.setValue('imapPort', preset.imapPort)
     form.setValue('imapSecurity', preset.imapSecurity)
+    form.setValue('popHost', preset.popHost ?? '')
+    form.setValue('popPort', preset.popPort ?? 995)
+    form.setValue('popSecurity', preset.popSecurity ?? 'ssl_tls')
     form.setValue('smtpHost', preset.smtpHost ?? '')
     form.setValue('smtpPort', preset.smtpPort ?? 465)
     form.setValue('smtpSecurity', preset.smtpSecurity ?? 'ssl_tls')
@@ -124,8 +128,7 @@ export function AddAccountForm({
         proxyMode: values.proxyMode,
         customProxyUrl: values.proxyMode === 'custom' ? values.customProxyUrl?.trim() : undefined,
         signatureMode: values.signatureMode,
-        signatureId: values.signatureMode === 'custom' ? values.signatureId : undefined,
-        remoteDeletePolicy: values.remoteDeletePolicy
+        signatureId: values.signatureMode === 'custom' ? values.signatureId : undefined
       })
       form.reset(defaultAccountFormValues)
       setKind(defaultAccountFormValues.kind)
@@ -172,27 +175,6 @@ export function AddAccountForm({
           {renderProviderForm(kind, form, t)}
           {kind === 'custom' ? null : <ProviderServerSummary kind={kind} />}
           <AccountPreferenceFields form={form} signatures={settings?.signatures ?? []} />
-          <AccountFormField
-            id="account-remote-delete-policy"
-            label={t('account.form.remoteDeletePolicy')}
-          >
-            <Controller
-              control={form.control}
-              name="remoteDeletePolicy"
-              render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
-                  <SelectTrigger id="account-remote-delete-policy" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="inherit">{t('settings.mailOperations.inherit')}</SelectItem>
-                    <SelectItem value="enabled">{t('common.yes')}</SelectItem>
-                    <SelectItem value="disabled">{t('common.no')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
-            />
-          </AccountFormField>
         </FieldGroup>
       </div>
 
@@ -215,7 +197,12 @@ function ProviderServerSummary({ kind }: { kind: AccountKind }): React.JSX.Eleme
   const { t } = useI18n()
   const preset = getProviderPreset(kind)
   return (
-    <section className="grid gap-2 rounded-md border bg-muted/30 p-3 sm:grid-cols-2">
+    <section
+      className={cn(
+        'grid gap-2 rounded-md border bg-muted/30 p-3',
+        preset.popHost ? 'sm:grid-cols-3' : 'sm:grid-cols-2'
+      )}
+    >
       <AccountFormField id="preset-imap" label={t('account.form.imapSettings')}>
         <Input
           id="preset-imap"
@@ -223,6 +210,15 @@ function ProviderServerSummary({ kind }: { kind: AccountKind }): React.JSX.Eleme
           disabled
         />
       </AccountFormField>
+      {preset.popHost ? (
+        <AccountFormField id="preset-pop" label={t('account.form.popSettings')}>
+          <Input
+            id="preset-pop"
+            value={`${preset.popHost}:${preset.popPort ?? 995} (${preset.popSecurity ?? 'ssl_tls'})`}
+            disabled
+          />
+        </AccountFormField>
+      ) : null}
       <AccountFormField id="preset-smtp" label={t('account.form.smtpSettings')}>
         <Input
           id="preset-smtp"

@@ -5,7 +5,6 @@ import type {
   AuthType,
   AccountProxyMode,
   ImapSecurity,
-  RemoteDeletePolicy,
   SignatureMode,
   SmtpSecurity
 } from '../../../../shared/types'
@@ -22,6 +21,8 @@ export const accountKinds = [
   'qqEnterprise',
   'outlook',
   'netease163',
+  'netease126',
+  'neteaseYeah',
   'sina',
   'mail139',
   'mail21cn',
@@ -43,6 +44,9 @@ export type ProviderPreset = {
   imapHost: string
   imapPort: number
   imapSecurity: ImapSecurity
+  popHost?: string
+  popPort?: number
+  popSecurity?: ImapSecurity
   smtpHost?: string
   smtpPort?: number
   smtpSecurity?: SmtpSecurity
@@ -67,7 +71,6 @@ export type AccountFormValues = {
   smtpPort: number
   smtpSecurity: SmtpSecurity
   smtpEnabled: boolean
-  remoteDeletePolicy: RemoteDeletePolicy
   usePopProtocol: boolean
   popHost?: string
   popPort: number
@@ -223,7 +226,50 @@ export const providerPresets: ProviderPreset[] = [
     imapHost: 'imap.163.com',
     imapPort: 993,
     imapSecurity: 'ssl_tls',
+    popHost: 'pop.163.com',
+    popPort: 995,
+    popSecurity: 'ssl_tls',
     smtpHost: 'smtp.163.com',
+    smtpPort: 465,
+    smtpSecurity: 'ssl_tls',
+    smtpAuthType: 'app_password',
+    smtpEnabled: true,
+    passwordLabelKey: 'account.form.authCode',
+    passwordPlaceholderKey: 'account.form.neteasePasswordPlaceholder',
+    guideKey: 'account.add.guide.netease163'
+  },
+  {
+    kind: 'netease126',
+    labelKey: 'account.provider.netease126',
+    providerKey: '126',
+    authType: 'app_password',
+    imapHost: 'imap.126.com',
+    imapPort: 993,
+    imapSecurity: 'ssl_tls',
+    popHost: 'pop.126.com',
+    popPort: 995,
+    popSecurity: 'ssl_tls',
+    smtpHost: 'smtp.126.com',
+    smtpPort: 465,
+    smtpSecurity: 'ssl_tls',
+    smtpAuthType: 'app_password',
+    smtpEnabled: true,
+    passwordLabelKey: 'account.form.authCode',
+    passwordPlaceholderKey: 'account.form.neteasePasswordPlaceholder',
+    guideKey: 'account.add.guide.netease163'
+  },
+  {
+    kind: 'neteaseYeah',
+    labelKey: 'account.provider.neteaseYeah',
+    providerKey: 'yeah',
+    authType: 'app_password',
+    imapHost: 'imap.yeah.net',
+    imapPort: 993,
+    imapSecurity: 'ssl_tls',
+    popHost: 'pop.yeah.net',
+    popPort: 995,
+    popSecurity: 'ssl_tls',
+    smtpHost: 'smtp.yeah.net',
     smtpPort: 465,
     smtpSecurity: 'ssl_tls',
     smtpAuthType: 'app_password',
@@ -424,7 +470,6 @@ export function createAccountSchema(
         .max(65535, t('account.form.portMax')),
       smtpSecurity: z.enum(['ssl_tls', 'starttls', 'none']),
       smtpEnabled: z.boolean(),
-      remoteDeletePolicy: z.enum(['inherit', 'enabled', 'disabled']),
       usePopProtocol: z.boolean(),
       popHost: z.string().trim().optional(),
       popPort: z
@@ -513,7 +558,6 @@ export const defaultAccountFormValues: AccountFormValues = {
   smtpPort: 465,
   smtpSecurity: 'ssl_tls',
   smtpEnabled: true,
-  remoteDeletePolicy: 'inherit',
   usePopProtocol: false,
   popHost: '',
   popPort: 995,

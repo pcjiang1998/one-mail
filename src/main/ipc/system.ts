@@ -1,6 +1,10 @@
 import { app, BrowserWindow, ipcMain, shell } from 'electron'
 import { getDatabasePath } from '../db/connection'
 import { takePendingMailtoRequests } from '../services/mailto'
+import {
+  configureDefaultMailClient,
+  getDefaultMailClientStatus
+} from '../services/default-mail-client'
 import type { AppTheme, SystemInfo } from './types'
 
 const TITLE_BAR_SYMBOL_COLORS: Record<AppTheme, string> = {
@@ -54,4 +58,6 @@ export function registerSystemIpc(): void {
   })
 
   ipcMain.handle('system/takePendingMailtoRequests', () => takePendingMailtoRequests())
+  ipcMain.handle('system/defaultMailClientStatus', () => getDefaultMailClientStatus())
+  ipcMain.handle('system/configureDefaultMailClient', () => configureDefaultMailClient())
 }

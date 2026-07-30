@@ -1,6 +1,6 @@
 import { app, shell, BrowserWindow, clipboard, Menu } from 'electron'
 import { mkdirSync } from 'node:fs'
-import { join, resolve } from 'path'
+import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import appIcon from '../../resources/icon.png?asset'
 import windowsIcon from '../../resources/icon.ico?asset'
@@ -16,6 +16,7 @@ import {
   stopMailboxWatchers
 } from './services/mailbox-watch'
 import { setNotificationOpenWindowHandler } from './services/notification-center'
+import { ensureDefaultMailClientRegistration } from './services/default-mail-client'
 import { enqueueMailtoUrl, findMailtoUrl } from './services/mailto'
 import {
   destroyTray,
@@ -173,20 +174,6 @@ function notifyMailtoOpened(): void {
   mainWindow.webContents.send('system/mailtoOpened')
 }
 
-function registerMailtoProtocol(): void {
-  if (process.env.ONE_MAIL_SKIP_PROTOCOL_REGISTRATION === '1') return
-
-  if (process.defaultApp) {
-    const entryPath = process.argv[1]
-    if (entryPath) {
-      app.setAsDefaultProtocolClient('mailto', process.execPath, [resolve(entryPath)])
-    }
-    return
-  }
-
-  app.setAsDefaultProtocolClient('mailto')
-}
-
 function getCopyLinkMenuLabel(): string {
   return app.getLocale().toLowerCase().startsWith('zh') ? '复制链接' : 'Copy link'
 }
@@ -198,7 +185,7 @@ if (hasSingleInstanceLock)
   app.whenReady().then(() => {
     // Set app user model id for windows
     electronApp.setAppUserModelId('com.pcjiang1998.onemailnext')
-    registerMailtoProtocol()
+    ensureDefaultMailClientRegistration()
     if (process.platform === 'darwin') {
       app.dock?.setIcon(appIcon)
     }

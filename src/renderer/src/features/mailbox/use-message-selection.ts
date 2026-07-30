@@ -47,10 +47,17 @@ export function useMessageSelection({ messages, resetKey }: UseMessageSelectionI
   }, [resetKey])
 
   const selectAllVisible = React.useCallback((): void => {
-    setSelection({
-      scopeKey: resetKey,
-      selectedMessageIds: new Set(messageIds),
-      lastSelectedMessageId: messageIds.at(-1) ?? null
+    setSelection((current) => {
+      const currentIds =
+        current.scopeKey === resetKey ? current.selectedMessageIds : new Set<string>()
+      const allSelected =
+        messageIds.length > 0 && messageIds.every((messageId) => currentIds.has(messageId))
+
+      return {
+        scopeKey: resetKey,
+        selectedMessageIds: allSelected ? new Set() : new Set(messageIds),
+        lastSelectedMessageId: allSelected ? null : (messageIds.at(-1) ?? null)
+      }
     })
   }, [messageIds, resetKey])
 

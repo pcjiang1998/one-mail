@@ -25,6 +25,7 @@ win:
   icon: build/icon.ico
   signAndEditExecutable: false
 nsis:
+  include: build/installer.nsh
   artifactName: ${name}-${version}-win-${arch}-setup.${ext}
   buildUniversalInstaller: false
   oneClick: false

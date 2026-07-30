@@ -6,7 +6,7 @@ import { normalizeMailDisplayText } from '../../shared/mail-text'
 import { authenticateImapSession } from './imap-auth'
 import { toImapConnectionError } from './imap-errors'
 import { parseImapMailboxList, type ImapMailbox } from './imap-mailboxes'
-import { getSelectedFolderPathKeys } from '../services/account-mailboxes'
+import { getSelectedFolderPathKeys, isRequiredFolderRole } from '../services/account-mailboxes'
 import { connectMailSocket } from '../services/network-proxy'
 import { formatImapIdCommand } from './imap-client-id'
 
@@ -464,12 +464,11 @@ async function listSyncMailboxes(accountId: number, client: ImapSession): Promis
   const available = uniqueMailboxes([inbox, ...selectable])
   const selectedPathKeys = getSelectedFolderPathKeys(accountId)
 
-  if (selectedPathKeys.size === 0) return [inbox]
-
   return uniqueMailboxes(
     available.filter(
       (mailbox) =>
-        mailbox.role === 'inbox' || selectedPathKeys.has(normalizeSelectedPath(mailbox.path))
+        isRequiredFolderRole(mailbox.role) ||
+        selectedPathKeys.has(normalizeSelectedPath(mailbox.path))
     )
   )
 }

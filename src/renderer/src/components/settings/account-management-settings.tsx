@@ -1,4 +1,13 @@
-import { GripVertical, LoaderCircle, Mail, Send, Trash2 } from 'lucide-react'
+import {
+  CircleCheck,
+  ExternalLink,
+  GripVertical,
+  LoaderCircle,
+  Mail,
+  MailCheck,
+  Send,
+  Trash2
+} from 'lucide-react'
 import * as React from 'react'
 
 import type { Account } from '@renderer/components/mail/types'
@@ -22,6 +31,8 @@ import {
 } from '@renderer/components/ui/select'
 import { cn } from '@renderer/lib/utils'
 import { useI18n } from '@renderer/lib/i18n'
+import { configureDefaultMailClient, getDefaultMailClientStatus } from '@renderer/lib/api'
+import type { DefaultMailClientStatus } from '../../../../shared/types'
 
 type AccountManagementSettingsProps = {
   accounts: Account[]
@@ -55,6 +66,11 @@ export function AccountManagementSettings({
   const [pending, setPending] = React.useState<'default' | 'delete' | 'reorder' | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
+  const [mailClientStatus, setMailClientStatus] = React.useState<DefaultMailClientStatus | null>(
+    null
+  )
+  const [mailClientPending, setMailClientPending] = React.useState(false)
+  const [mailClientError, setMailClientError] = React.useState<string | null>(null)
   const accountById = new Map(
     accounts.flatMap((account) =>
       account.accountId ? [[account.accountId, account] as const] : []
@@ -74,6 +90,26 @@ export function AccountManagementSettings({
   const allSelected = orderedAccounts.length > 0 && selectedCount === orderedAccounts.length
   const selectionState: boolean | 'indeterminate' =
     selectedCount === 0 ? false : allSelected ? true : 'indeterminate'
+
+  React.useEffect(() => {
+    let cancelled = false
+    const refreshStatus = (): void => {
+      void getDefaultMailClientStatus()
+        .then((status) => {
+          if (!cancelled) setMailClientStatus(status)
+        })
+        .catch(() => {
+          if (!cancelled) setMailClientStatus(null)
+        })
+    }
+    const initialTimer = window.setTimeout(refreshStatus, 0)
+    window.addEventListener('focus', refreshStatus)
+    return () => {
+      cancelled = true
+      window.clearTimeout(initialTimer)
+      window.removeEventListener('focus', refreshStatus)
+    }
+  }, [])
 
   function toggleAccount(accountId: number, checked: boolean): void {
     setSelectedIds((current) => {
@@ -187,8 +223,69 @@ export function AccountManagementSettings({
     }
   }
 
+  async function handleConfigureMailClient(): Promise<void> {
+    setMailClientPending(true)
+    setMailClientError(null)
+    try {
+      setMailClientStatus(await configureDefaultMailClient())
+    } catch {
+      setMailClientError(t('settings.accounts.mailHandlerError'))
+    } finally {
+      setMailClientPending(false)
+    }
+  }
+
   return (
     <div className="mx-auto flex min-h-full w-full max-w-[620px] flex-col gap-3 p-3 sm:p-4">
+      <div className="grid gap-3 rounded-md border bg-card p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+        <div className="flex min-w-0 gap-2.5">
+          <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+            <MailCheck className="size-4" aria-hidden="true" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-xs font-medium">{t('settings.accounts.mailHandlerTitle')}</div>
+            <div className="mt-0.5 text-xs leading-snug text-muted-foreground">
+              {t('settings.accounts.mailHandlerDescription')}
+            </div>
+            <div className="mt-1 text-xs font-medium">
+              {mailClientStatus?.isDefault
+                ? t('settings.accounts.mailHandlerDefault')
+                : mailClientStatus?.registered
+                  ? t('settings.accounts.mailHandlerRegistered')
+                  : mailClientStatus?.supported === false
+                    ? t('settings.accounts.mailHandlerUnsupported')
+                    : t('settings.accounts.mailHandlerNotDefault')}
+            </div>
+          </div>
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={
+            mailClientPending ||
+            mailClientStatus?.isDefault === true ||
+            mailClientStatus?.supported === false
+          }
+          onClick={() => void handleConfigureMailClient()}
+        >
+          {mailClientPending ? (
+            <LoaderCircle data-icon="inline-start" className="animate-spin" />
+          ) : mailClientStatus?.isDefault ? (
+            <CircleCheck data-icon="inline-start" />
+          ) : (
+            <ExternalLink data-icon="inline-start" />
+          )}
+          {mailClientStatus?.isDefault
+            ? t('settings.accounts.mailHandlerConfigured')
+            : mailClientStatus?.requiresSystemSelection
+              ? t('settings.accounts.mailHandlerOpenSettings')
+              : t('settings.accounts.mailHandlerConfigure')}
+        </Button>
+        {mailClientError ? (
+          <FieldError className="sm:col-span-2">{mailClientError}</FieldError>
+        ) : null}
+      </div>
+
       <div className="grid gap-3 rounded-md border bg-card p-3 sm:grid-cols-[minmax(0,1fr)_220px] sm:items-center">
         <div className="flex min-w-0 gap-2.5">
           <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
@@ -355,6 +452,8 @@ export function AccountManagementSettings({
   )
 }
 
+// Kept here so the reorder tests exercise the exact helper used by this component.
+// eslint-disable-next-line react-refresh/only-export-components
 export function moveAccounts(
   accounts: Account[],
   movingAccountIds: number[],

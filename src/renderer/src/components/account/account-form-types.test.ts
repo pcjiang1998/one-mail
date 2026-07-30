@@ -22,6 +22,27 @@ describe('account provider presets', () => {
     )
   })
 
+  it.each([
+    ['netease163', '163', 'imap.163.com', 'smtp.163.com', 'pop.163.com'],
+    ['netease126', '126', 'imap.126.com', 'smtp.126.com', 'pop.126.com'],
+    ['neteaseYeah', 'yeah', 'imap.yeah.net', 'smtp.yeah.net', 'pop.yeah.net']
+  ] as const)(
+    'uses the correct NetEase endpoints for %s',
+    (kind, providerKey, imapHost, smtpHost, popHost) => {
+      expect(getProviderPreset(kind)).toEqual(
+        expect.objectContaining({
+          providerKey,
+          imapHost,
+          imapPort: 993,
+          smtpHost,
+          smtpPort: 465,
+          popHost,
+          popPort: 995
+        })
+      )
+    }
+  )
+
   it('requires an SMTP host only when custom SMTP sending is enabled', () => {
     const schema = createAccountSchema(translateKey)
     const customAccount = {
@@ -38,8 +59,7 @@ describe('account provider presets', () => {
       smtpHost: '',
       smtpPort: 465,
       smtpSecurity: 'ssl_tls' as const,
-      smtpEnabled: true,
-      remoteDeletePolicy: 'inherit' as const
+      smtpEnabled: true
     }
 
     expect(schema.safeParse(customAccount).success).toBe(false)

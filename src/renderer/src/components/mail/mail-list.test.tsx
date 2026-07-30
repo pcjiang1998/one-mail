@@ -1,5 +1,40 @@
 import { fireEvent, render, screen } from '@testing-library/react'
+import type { MouseEvent as ReactMouseEvent, ReactElement, ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const contextMenuTriggerSpy = vi.hoisted(() => vi.fn())
+
+vi.mock('@renderer/components/ui/context-menu', async () => {
+  const { cloneElement, createElement, Fragment } = await import('react')
+  const passthrough = ({ children }: { children?: ReactNode }): ReactNode =>
+    createElement(Fragment, null, children)
+
+  return {
+    ContextMenu: passthrough,
+    ContextMenuTrigger: ({ children }: { children: ReactNode }) => {
+      const child = children as ReactElement<{
+        onContextMenu?: (event: ReactMouseEvent<HTMLElement>) => void
+      }>
+      return cloneElement(child, {
+        onContextMenu: (event: ReactMouseEvent<HTMLElement>) => {
+          child.props.onContextMenu?.(event)
+          contextMenuTriggerSpy(event)
+        }
+      })
+    },
+    ContextMenuContent: passthrough,
+    ContextMenuSeparator: () => createElement('hr'),
+    ContextMenuItem: ({
+      children,
+      disabled,
+      onSelect
+    }: {
+      children?: ReactNode
+      disabled?: boolean
+      onSelect?: () => void
+    }) => createElement('button', { disabled, onClick: onSelect }, children)
+  }
+})
 
 import { I18nProvider } from '@renderer/lib/i18n'
 import { MailList } from './mail-list'
@@ -38,6 +73,7 @@ function createMessage(id: string): Message {
 
 afterEach(() => {
   vi.useRealTimers()
+  contextMenuTriggerSpy.mockClear()
 })
 
 describe('MailList range selection', () => {
@@ -75,5 +111,147 @@ describe('MailList range selection', () => {
     fireEvent.click(checkbox)
     expect(onToggleMessageSelection).toHaveBeenCalledTimes(2)
     expect(onToggleMessageSelection).toHaveBeenLastCalledWith('2', false)
+  })
+
+  it('toggles a message without opening it when Ctrl-clicking the summary', () => {
+    const onToggleMessageSelection = vi.fn()
+    const onSelectMessage = vi.fn()
+
+    render(
+      <I18nProvider initialLocale="en-US">
+        <MailList
+          account={account}
+          messages={[createMessage('1'), createMessage('2')]}
+          selectedMessageId="1"
+          filters={[]}
+          searchKeyword=""
+          onSelectMessage={onSelectMessage}
+          onChangeFilters={() => undefined}
+          onChangeSearchKeyword={() => undefined}
+          onLoadMore={() => undefined}
+          onToggleMessageSelection={onToggleMessageSelection}
+        />
+      </I18nProvider>
+    )
+
+    const row = screen.getByText('Subject 2').closest('[role="button"]')
+    expect(row).not.toBeNull()
+    fireEvent.click(row!, { ctrlKey: true })
+
+    expect(onToggleMessageSelection).toHaveBeenCalledWith('2', false)
+    expect(onSelectMessage).not.toHaveBeenCalled()
+  })
+
+  it('clears multi-selection before opening a message on a plain click', () => {
+    const onClearSelection = vi.fn()
+    const onSelectMessage = vi.fn()
+
+    render(
+      <I18nProvider initialLocale="en-US">
+        <MailList
+          account={account}
+          messages={[createMessage('1'), createMessage('2')]}
+          selectedMessageId="1"
+          filters={[]}
+          searchKeyword=""
+          selectedMessageIds={new Set(['1', '2'])}
+          onSelectMessage={onSelectMessage}
+          onChangeFilters={() => undefined}
+          onChangeSearchKeyword={() => undefined}
+          onLoadMore={() => undefined}
+          onClearSelection={onClearSelection}
+        />
+      </I18nProvider>
+    )
+
+    fireEvent.click(screen.getByText('Subject 2').closest('[role="button"]')!)
+
+    expect(onClearSelection).toHaveBeenCalledOnce()
+    expect(onSelectMessage).toHaveBeenCalledWith('2')
+    expect(onClearSelection.mock.invocationCallOrder[0]).toBeLessThan(
+      onSelectMessage.mock.invocationCallOrder[0]
+    )
+  })
+})
+
+describe('MailList context menu', () => {
+  it('forwards the context-menu trigger event to the message summary DOM node', () => {
+    const onPrepareContextSelection = vi.fn()
+
+    render(
+      <I18nProvider initialLocale="en-US">
+        <MailList
+          account={account}
+          messages={[createMessage('1')]}
+          selectedMessageId=""
+          filters={[]}
+          searchKeyword=""
+          onSelectMessage={() => undefined}
+          onChangeFilters={() => undefined}
+          onChangeSearchKeyword={() => undefined}
+          onLoadMore={() => undefined}
+          onPrepareContextSelection={onPrepareContextSelection}
+        />
+      </I18nProvider>
+    )
+
+    fireEvent.contextMenu(screen.getByText('Subject 1').closest('[role="button"]')!)
+
+    expect(contextMenuTriggerSpy).toHaveBeenCalledOnce()
+    expect(onPrepareContextSelection).toHaveBeenCalledWith('1')
+  })
+
+  it('offers reply actions for one message', () => {
+    const onReplyMessage = vi.fn()
+    const message = createMessage('1')
+
+    render(
+      <I18nProvider initialLocale="en-US">
+        <MailList
+          account={account}
+          messages={[message]}
+          selectedMessageId="1"
+          filters={[]}
+          searchKeyword=""
+          onSelectMessage={() => undefined}
+          onChangeFilters={() => undefined}
+          onChangeSearchKeyword={() => undefined}
+          onLoadMore={() => undefined}
+          onReplyMessage={onReplyMessage}
+        />
+      </I18nProvider>
+    )
+
+    fireEvent.click(screen.getByText('Reply all'))
+
+    expect(onReplyMessage).toHaveBeenCalledWith(message, true)
+  })
+
+  it('offers individual and EML attachment forwarding for multiple messages', () => {
+    const onForwardMessages = vi.fn()
+    const messages = [createMessage('1'), createMessage('2')]
+
+    render(
+      <I18nProvider initialLocale="en-US">
+        <MailList
+          account={account}
+          messages={messages}
+          selectedMessageId="1"
+          filters={[]}
+          searchKeyword=""
+          selectedMessageIds={new Set(['1', '2'])}
+          onSelectMessage={() => undefined}
+          onChangeFilters={() => undefined}
+          onChangeSearchKeyword={() => undefined}
+          onLoadMore={() => undefined}
+          onForwardMessages={onForwardMessages}
+        />
+      </I18nProvider>
+    )
+
+    expect(screen.getAllByText('Forward individually')).toHaveLength(2)
+    fireEvent.click(screen.getAllByText('Forward as original mail')[0])
+
+    expect(onForwardMessages).toHaveBeenCalledWith(messages, true)
   })
 })

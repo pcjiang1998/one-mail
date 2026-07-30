@@ -482,6 +482,13 @@ export type MailtoComposeRequest = {
   body: string
 }
 
+export type DefaultMailClientStatus = {
+  supported: boolean
+  registered: boolean
+  isDefault: boolean
+  requiresSystemSelection: boolean
+}
+
 export type SettingsUpdateInput = Partial<AppSettings>
 
 export type TranslationProvider =
@@ -775,6 +782,8 @@ export type OneMailApi = {
     revealDatabase: () => Promise<boolean>
     revealPath: (path: string) => Promise<boolean>
     openExternal: (url: string) => Promise<boolean>
+    defaultMailClientStatus: () => Promise<DefaultMailClientStatus>
+    configureDefaultMailClient: () => Promise<DefaultMailClientStatus>
     takePendingMailtoRequests: () => Promise<MailtoComposeRequest[]>
     onMailtoOpened: (callback: () => void) => () => void
   }

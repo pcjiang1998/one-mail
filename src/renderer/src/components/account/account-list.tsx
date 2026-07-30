@@ -212,29 +212,39 @@ function AccountFolderRows({
 }): React.JSX.Element {
   const { t } = useI18n()
   const folders = (account.folders ?? []).filter((folder) => folder.role !== 'drafts')
+  const inbox = folders.find((folder) => folder.role === 'inbox')
+  const sent = folders.find((folder) => folder.role === 'sent')
+  const junk = folders.find((folder) => folder.role === 'junk')
+  const additionalFolders = folders.filter(
+    (folder) => folder.role !== 'inbox' && folder.role !== 'sent' && folder.role !== 'junk'
+  )
+
+  function renderRemoteFolder(folder: (typeof folders)[number]): React.ReactNode {
+    if (!account.accountId || !folder.folderId) return null
+    const key = getFolderSelectionKey(account.accountId, folder.folderId)
+    return (
+      <FolderRow
+        key={key}
+        label={getFolderLabel(folder.role, folder.name, t)}
+        count={folder.unreadCount}
+        selected={selectedAccountId === key}
+        icon={getFolderIcon(folder.role)}
+        onClick={() => onSelectAccount(key)}
+      />
+    )
+  }
 
   return (
     <div className="ml-7 flex flex-col gap-0.5 border-l pl-1.5">
-      {folders.map((folder) => {
-        if (!account.accountId || !folder.folderId) return null
-        const key = getFolderSelectionKey(account.accountId, folder.folderId)
-        return (
-          <FolderRow
-            key={key}
-            label={getFolderLabel(folder.role, folder.name, t)}
-            count={folder.unreadCount}
-            selected={selectedAccountId === key}
-            icon={getFolderIcon(folder.role)}
-            onClick={() => onSelectAccount(key)}
-          />
-        )
-      })}
+      {inbox ? renderRemoteFolder(inbox) : null}
       <FolderRow
         label={t('account.folders.localDrafts')}
         selected={false}
         icon={<FilePenLine />}
         onClick={() => onOpenDrafts(account)}
       />
+      {sent ? renderRemoteFolder(sent) : null}
+      {junk ? renderRemoteFolder(junk) : null}
       {account.accountId ? (
         <FolderRow
           label={t('account.folders.localDeleted')}
@@ -243,6 +253,7 @@ function AccountFolderRows({
           onClick={() => onSelectAccount(getLocalDeletedSelectionKey(account.accountId!))}
         />
       ) : null}
+      {additionalFolders.map(renderRemoteFolder)}
     </div>
   )
 }

@@ -14,7 +14,6 @@ import {
   Mails,
   Network,
   Palette,
-  Settings2,
   Power,
   RefreshCcw,
   Save,
@@ -84,8 +83,7 @@ import type {
   BackupSyncSettings,
   SettingsUpdateInput,
   SystemInfo,
-  UpdateCheckFrequency,
-  RemoteDeletePolicy
+  UpdateCheckFrequency
 } from '../../../../shared/types'
 import { cn } from '@renderer/lib/utils'
 import { useI18n, type TranslationKey } from '@renderer/lib/i18n'
@@ -112,7 +110,6 @@ type SettingsDialogProps = {
 type SettingsSection =
   | 'accounts'
   | 'general'
-  | 'mailOperations'
   | 'signatures'
   | 'network'
   | 'sync'
@@ -142,7 +139,6 @@ type SettingsFormValues = {
   locale: 'zh-CN' | 'en-US'
   theme: AppColorTheme
   updateCheckFrequency: UpdateCheckFrequency
-  syncDeleteToRemote: boolean
 }
 
 const sections: Array<{
@@ -159,11 +155,6 @@ const sections: Array<{
     value: 'accounts',
     labelKey: 'settings.accounts',
     icon: Mails
-  },
-  {
-    value: 'mailOperations',
-    labelKey: 'settings.mailOperations',
-    icon: Settings2
   },
   {
     value: 'sync',
@@ -266,8 +257,7 @@ export function SettingsDialog({
             externalImagesBlocked: currentValues.externalImagesBlocked,
             locale: currentValues.locale,
             theme: currentValues.theme,
-            updateCheckFrequency: currentValues.updateCheckFrequency,
-            syncDeleteToRemote: currentValues.syncDeleteToRemote
+            updateCheckFrequency: currentValues.updateCheckFrequency
           })
           lastSavedValuesRef.current = currentValues
         } catch (submitError) {
@@ -528,12 +518,6 @@ export function SettingsDialog({
               />
             ) : section === 'general' ? (
               <GeneralSettingsForm form={form} error={error} systemInfo={systemInfo} />
-            ) : section === 'mailOperations' ? (
-              <MailOperationsSettings
-                form={form}
-                accounts={accounts}
-                onUpdateAccount={onUpdateAccount}
-              />
             ) : section === 'signatures' ? (
               <SignatureSettings
                 settings={settings}
@@ -596,94 +580,6 @@ export function SettingsDialog({
         onImported={handleBackupImported}
       />
     </>
-  )
-}
-
-function MailOperationsSettings({
-  form,
-  accounts,
-  onUpdateAccount
-}: {
-  form: ReturnType<typeof useForm<SettingsFormValues>>
-  accounts: Account[]
-  onUpdateAccount: (input: AccountUpdateInput) => Promise<void>
-}): React.JSX.Element {
-  const { t } = useI18n()
-  const [pendingAccountId, setPendingAccountId] = React.useState<number | null>(null)
-  const [policyError, setPolicyError] = React.useState<string | null>(null)
-
-  async function handlePolicyChange(accountId: number, policy: RemoteDeletePolicy): Promise<void> {
-    setPendingAccountId(accountId)
-    setPolicyError(null)
-    try {
-      await onUpdateAccount({ accountId, remoteDeletePolicy: policy })
-    } catch (updateError) {
-      setPolicyError(updateError instanceof Error ? updateError.message : t('settings.updateError'))
-    } finally {
-      setPendingAccountId(null)
-    }
-  }
-
-  return (
-    <div className="p-4">
-      <FieldGroup className="gap-4">
-        <Controller
-          control={form.control}
-          name="syncDeleteToRemote"
-          render={({ field }) => (
-            <Field orientation="horizontal" className="items-center justify-between border-b pb-4">
-              <FieldContent>
-                <FieldLabel>{t('settings.mailOperations.syncDeleteTitle')}</FieldLabel>
-                <FieldDescription>
-                  {t('settings.mailOperations.syncDeleteDescription')}
-                </FieldDescription>
-              </FieldContent>
-              <Switch checked={field.value} onCheckedChange={field.onChange} />
-            </Field>
-          )}
-        />
-
-        <div>
-          <h3 className="text-sm font-medium">{t('settings.mailOperations.accountsTitle')}</h3>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {t('settings.mailOperations.accountDescription')}
-          </p>
-          <div className="mt-3 border-y">
-            {accounts.map((account) =>
-              account.accountId ? (
-                <div
-                  key={account.accountId}
-                  className="flex min-h-12 items-center gap-3 border-b py-2 last:border-b-0"
-                >
-                  <span className="min-w-0 flex-1 truncate text-sm">
-                    {account.name || account.address}
-                  </span>
-                  <Select
-                    value={account.remoteDeletePolicy ?? 'inherit'}
-                    disabled={pendingAccountId === account.accountId}
-                    onValueChange={(value) =>
-                      void handlePolicyChange(account.accountId!, value as RemoteDeletePolicy)
-                    }
-                  >
-                    <SelectTrigger className="w-36">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="inherit">
-                        {t('settings.mailOperations.inherit')}
-                      </SelectItem>
-                      <SelectItem value="enabled">{t('common.yes')}</SelectItem>
-                      <SelectItem value="disabled">{t('common.no')}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : null
-            )}
-          </div>
-          {policyError ? <FieldError className="mt-2">{policyError}</FieldError> : null}
-        </div>
-      </FieldGroup>
-    </div>
   )
 }
 
@@ -1351,8 +1247,7 @@ function createSettingsSchema(t: (key: TranslationKey) => string) {
     externalImagesBlocked: z.boolean(),
     locale: z.enum(['zh-CN', 'en-US']),
     theme: z.enum(APP_COLOR_THEMES),
-    updateCheckFrequency: z.enum(['manual', 'daily', 'weekly']),
-    syncDeleteToRemote: z.boolean()
+    updateCheckFrequency: z.enum(['manual', 'daily', 'weekly'])
   })
 }
 
@@ -1364,8 +1259,7 @@ function toFormValues(settings: AppSettings | null): SettingsFormValues {
     externalImagesBlocked: settings?.externalImagesBlocked !== false,
     locale: settings?.locale === 'en-US' ? 'en-US' : 'zh-CN',
     theme: settings?.theme ?? 'light',
-    updateCheckFrequency: settings?.updateCheckFrequency ?? 'daily',
-    syncDeleteToRemote: settings?.syncDeleteToRemote !== false
+    updateCheckFrequency: settings?.updateCheckFrequency ?? 'daily'
   }
 }
 
@@ -1377,7 +1271,6 @@ function areSettingsEqual(first: SettingsFormValues, second: SettingsFormValues)
     first.externalImagesBlocked === second.externalImagesBlocked &&
     first.locale === second.locale &&
     first.theme === second.theme &&
-    first.updateCheckFrequency === second.updateCheckFrequency &&
-    first.syncDeleteToRemote === second.syncDeleteToRemote
+    first.updateCheckFrequency === second.updateCheckFrequency
   )
 }

@@ -28,7 +28,6 @@ import type {
   AccountSyncMode,
   AccountUpdateInput,
   AppSettings,
-  RemoteDeletePolicy,
   SignatureMode,
   SmtpSecurity
 } from '../../../../shared/types'
@@ -42,7 +41,6 @@ type EditAccountValues = {
   smtpHost?: string
   smtpPort: number
   smtpSecurity: SmtpSecurity
-  remoteDeletePolicy: RemoteDeletePolicy
   proxyMode: AccountProxyMode
   customProxyUrl?: string
   signatureMode: SignatureMode
@@ -130,7 +128,7 @@ export function EditAccountDialog({
   }
 
   function handleFolderChecked(folder: AccountMailFolder, checked: boolean): void {
-    if (folder.role === 'inbox') return
+    if (isRequiredFolderRole(folder.role)) return
 
     setSelectedFolderPaths((current) => {
       const next = new Set(current)
@@ -162,7 +160,6 @@ export function EditAccountDialog({
         smtpHost: isCustomAccount && values.smtpEnabled ? values.smtpHost?.trim() : undefined,
         smtpPort: isCustomAccount && values.smtpEnabled ? values.smtpPort : undefined,
         smtpSecurity: isCustomAccount && values.smtpEnabled ? values.smtpSecurity : undefined,
-        remoteDeletePolicy: values.remoteDeletePolicy,
         proxyMode: values.proxyMode,
         customProxyUrl: values.proxyMode === 'custom' ? optionalText(values.customProxyUrl) : '',
         signatureMode: values.signatureMode,
@@ -463,31 +460,6 @@ export function EditAccountDialog({
               />
             ) : null}
           </AccountFormField>
-
-          <AccountFormField
-            id="edit-remote-delete-policy"
-            label={t('account.form.remoteDeletePolicy')}
-          >
-            <Controller
-              control={form.control}
-              name="remoteDeletePolicy"
-              render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
-                  <SelectTrigger id="edit-remote-delete-policy" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="inherit">{t('settings.mailOperations.inherit')}</SelectItem>
-                    <SelectItem value="enabled">{t('common.yes')}</SelectItem>
-                    <SelectItem value="disabled">{t('common.no')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
-            />
-          </AccountFormField>
-          <p className="text-xs text-muted-foreground">
-            {t('settings.mailOperations.accountDescription')}
-          </p>
         </section>
 
         {account.receiveProtocol === 'pop3' ? null : (
@@ -514,7 +486,8 @@ export function EditAccountDialog({
                 {folders
                   .filter((folder) => folder.selectable)
                   .map((folder) => {
-                    const checked = folder.role === 'inbox' || selectedFolderPaths.has(folder.path)
+                    const checked =
+                      isRequiredFolderRole(folder.role) || selectedFolderPaths.has(folder.path)
                     return (
                       <label
                         key={folder.path}
@@ -522,7 +495,7 @@ export function EditAccountDialog({
                       >
                         <Checkbox
                           checked={checked}
-                          disabled={folder.role === 'inbox'}
+                          disabled={isRequiredFolderRole(folder.role)}
                           onCheckedChange={(value) => handleFolderChecked(folder, value === true)}
                         />
                         <span className="min-w-0 flex-1">
@@ -547,6 +520,10 @@ export function EditAccountDialog({
   )
 }
 
+function isRequiredFolderRole(role: AccountMailFolder['role']): boolean {
+  return role === 'inbox' || role === 'sent' || role === 'junk'
+}
+
 function createEditAccountSchema(
   t: (key: TranslationKey) => string,
   validateSmtp: boolean
@@ -556,7 +533,6 @@ function createEditAccountSchema(
       accountLabel: z.string().trim().max(80, t('account.form.labelMax')).optional(),
       password: z.string().trim().optional(),
       smtpEnabled: z.boolean(),
-      remoteDeletePolicy: z.enum(['inherit', 'enabled', 'disabled']),
       proxyMode: z.enum(['global', 'none', 'system', 'custom']),
       customProxyUrl: z.string().trim().optional(),
       signatureMode: z.enum(['global', 'none', 'custom']),
@@ -601,7 +577,6 @@ function getDefaultValues(account: Account): EditAccountValues {
     accountLabel: getInitialLabel(account),
     password: '',
     smtpEnabled: account.smtpEnabled ?? false,
-    remoteDeletePolicy: account.remoteDeletePolicy ?? 'inherit',
     smtpHost: account.smtpHost ?? '',
     smtpPort: account.smtpPort ?? 465,
     smtpSecurity: account.smtpSecurity ?? 'ssl_tls',

@@ -558,6 +558,19 @@ export function getMessageComposeSource(messageId: number): MessageComposeSource
   }
 }
 
+export function getMessageRawSource(messageId: number): string | undefined {
+  const row = getDatabase()
+    .prepare<{ raw_source: string | null }>(
+      `
+      SELECT raw_source
+      FROM onemail_message_bodies
+      WHERE message_id = :messageId
+      `
+    )
+    .get({ messageId })
+  return toOptionalString(row?.raw_source)
+}
+
 export function markMessageAnswered(messageId: number, isAnswered = true): void {
   getDatabase()
     .prepare(

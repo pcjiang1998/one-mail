@@ -37,7 +37,7 @@ export async function updateAccountFolderSelection(
   if (!inbox) throw new Error('IMAP 服务器未返回可选择的 INBOX。')
   requestedKeys.add(normalizePath(inbox.path))
   for (const mailbox of selectable) {
-    if (isDefaultFolderRole(mailbox.role)) requestedKeys.add(normalizePath(mailbox.path))
+    if (isRequiredFolderRole(mailbox.role)) requestedKeys.add(normalizePath(mailbox.path))
   }
 
   for (const key of requestedKeys) {
@@ -94,9 +94,9 @@ function applyStoredSelection(accountId: number, mailboxes: ImapMailbox[]): Acco
     ...mailbox,
     selected:
       mailbox.selectable &&
-      (mailbox.role === 'inbox' ||
+      (isRequiredFolderRole(mailbox.role) ||
         (hasSelection && selectedKeys.has(normalizePath(mailbox.path))) ||
-        (!hasSelection && isDefaultFolderRole(mailbox.role)))
+        (!hasSelection && isRequiredFolderRole(mailbox.role)))
   }))
 }
 
@@ -113,14 +113,15 @@ function persistFolderSelection(
     .all({ accountId })
   const existingByKey = new Map(existingRows.map((row) => [normalizePath(row.path), row]))
   const remoteKeys = new Set(mailboxes.map((mailbox) => normalizePath(mailbox.path)))
+  const deleteFolder = db.prepare(
+    'DELETE FROM onemail_mail_folders WHERE folder_id = :folderId AND account_id = :accountId'
+  )
 
   db.exec('BEGIN IMMEDIATE')
   try {
     for (const row of existingRows) {
       if (!remoteKeys.has(normalizePath(row.path))) {
-        db.prepare('DELETE FROM onemail_mail_folders WHERE folder_id = :folderId').run({
-          folderId: row.folder_id
-        })
+        deleteFolder.run({ folderId: row.folder_id, accountId })
       }
     }
 
@@ -128,6 +129,14 @@ function persistFolderSelection(
       const key = normalizePath(mailbox.path)
       const selected = mailbox.selectable && selectedKeys.has(key)
       const existing = existingByKey.get(key)
+
+      if (!selected) {
+        if (existing && !isRequiredFolderRole(mailbox.role)) {
+          deleteFolder.run({ folderId: existing.folder_id, accountId })
+        }
+        continue
+      }
+
       const values = {
         accountId,
         path: mailbox.path,
@@ -155,11 +164,9 @@ function persistFolderSelection(
               unread_count = CASE WHEN :syncEnabled = 0 THEN 0 ELSE unread_count END,
               sort_order = :sortOrder,
               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-          WHERE folder_id = :folderId
+          WHERE folder_id = :folderId AND account_id = :accountId
           `
         ).run({ ...values, folderId: existing.folder_id })
-
-        if (!selected) clearFolderCache(existing.folder_id)
         continue
       }
 
@@ -182,12 +189,6 @@ function persistFolderSelection(
     db.exec('ROLLBACK')
     throw error
   }
-}
-
-function clearFolderCache(folderId: number): void {
-  const db = getDatabase()
-  db.prepare('DELETE FROM onemail_mail_messages WHERE folder_id = :folderId').run({ folderId })
-  db.prepare('DELETE FROM onemail_folder_sync_states WHERE folder_id = :folderId').run({ folderId })
 }
 
 function compareMailboxes(left: ImapMailbox, right: ImapMailbox): number {
@@ -214,8 +215,6 @@ function normalizePath(path: string): string {
   return path.trim().toLocaleLowerCase('en-US')
 }
 
-function isDefaultFolderRole(role: ImapMailbox['role']): boolean {
-  return (
-    role === 'inbox' || role === 'sent' || role === 'drafts' || role === 'junk' || role === 'trash'
-  )
+export function isRequiredFolderRole(role: ImapMailbox['role']): boolean {
+  return role === 'inbox' || role === 'sent' || role === 'junk'
 }

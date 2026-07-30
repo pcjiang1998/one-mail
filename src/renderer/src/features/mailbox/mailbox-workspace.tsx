@@ -133,6 +133,11 @@ export function MailboxWorkspace(): React.JSX.Element {
     useSyncFeedback()
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
+  const selectedMailbox = parseMailboxSelection(selectedAccountId)
+  const refreshAccounts = React.useCallback(async () => {
+    const nextAccounts = await loadAccounts()
+    setAccounts(nextAccounts)
+  }, [])
   const {
     messages,
     selectedMessage,
@@ -184,7 +189,9 @@ export function MailboxWorkspace(): React.JSX.Element {
   } = useMessageActions({
     removeMessages,
     clearSelection,
-    setError
+    setError,
+    localDeletedOnly: selectedMailbox.localDeletedOnly === true,
+    onDeleted: refreshAccounts
   })
   const mainLayout = ResizablePrimitive.useDefaultLayout({
     id: 'onemail-main-layout',
@@ -200,12 +207,16 @@ export function MailboxWorkspace(): React.JSX.Element {
   const realAccounts = accounts.filter((account) => Boolean(account.accountId))
   const hasAccounts = realAccounts.length > 0
   const selectedAccount =
-    accounts.find(
-      (account) => account.accountId === parseMailboxSelection(selectedAccountId).accountId
-    ) ??
+    accounts.find((account) => account.accountId === selectedMailbox.accountId) ??
     accounts.find((account) => account.id === selectedAccountId) ??
     accounts[0] ??
     getFallbackAccount()
+  const selectedMailboxUnread = selectedMailbox.folderId
+    ? (selectedAccount.folders?.find((folder) => folder.folderId === selectedMailbox.folderId)
+        ?.unreadCount ?? messages.filter((message) => message.unread).length)
+    : selectedMailbox.localDeletedOnly
+      ? messages.filter((message) => message.unread).length
+      : selectedAccount.unread
   const selectedMessageAccount = selectedMessage
     ? accounts.find((account) => account.accountId === selectedMessage.accountId)
     : undefined
@@ -229,11 +240,6 @@ export function MailboxWorkspace(): React.JSX.Element {
   })
   const routeAccountId = normalizeRouteId(routeParams.accountId)
   const routeMessageId = normalizeRouteId(routeParams.messageId)
-
-  const refreshAccounts = React.useCallback(async () => {
-    const nextAccounts = await loadAccounts()
-    setAccounts(nextAccounts)
-  }, [])
 
   const refreshOutbox = React.useCallback(async (): Promise<void> => {
     const messages = await loadOutboxMessages()
@@ -725,16 +731,15 @@ export function MailboxWorkspace(): React.JSX.Element {
   async function handleMarkSelectedRead(): Promise<void> {
     if (markingRead || selectedMessages.length === 0) return
 
+    const pendingToastId = toast.loading(t('mailbox.markReadPending'))
     try {
       const result = await markMessagesRead(selectedMessages)
       clearSelection()
-
-      if (filters.includes('unread')) {
-        await refreshMessages(selectedAccountId, filters, searchKeyword)
-      }
-
+      await refreshReadStateViews()
+      toast.dismiss(pendingToastId)
       showMarkReadResult(result.updatedCount, result.failedCount)
     } catch (markReadError) {
+      toast.dismiss(pendingToastId)
       const messageText = getErrorMessage(markReadError, t('mailbox.readStateError'))
       setError(messageText)
       toast.error(messageText)
@@ -762,14 +767,15 @@ export function MailboxWorkspace(): React.JSX.Element {
   async function handleMarkMessagesRead(targetMessages: Message[]): Promise<void> {
     if (markingRead || targetMessages.length === 0) return
 
+    const pendingToastId = toast.loading(t('mailbox.markReadPending'))
     try {
       const result = await markMessagesRead(targetMessages)
       clearSelection()
-      if (filters.includes('unread')) {
-        await refreshMessages(selectedAccountId, filters, searchKeyword)
-      }
+      await refreshReadStateViews()
+      toast.dismiss(pendingToastId)
       showMarkReadResult(result.updatedCount, result.failedCount)
     } catch (markReadError) {
+      toast.dismiss(pendingToastId)
       const messageText = getErrorMessage(markReadError, t('mailbox.readStateError'))
       setError(messageText)
       toast.error(messageText)
@@ -777,23 +783,31 @@ export function MailboxWorkspace(): React.JSX.Element {
   }
 
   async function handleMarkAllRead(): Promise<void> {
-    if (markingRead || selectedAccount.unread === 0) return
+    if (markingRead || selectedMailboxUnread === 0) return
 
+    const pendingToastId = toast.loading(t('mailbox.markReadPending'))
     try {
       const result = await markCurrentQueryRead(
         toMessageQuery(selectedAccountId, filters, undefined, searchKeyword)
       )
-
-      if (filters.includes('unread')) {
-        await refreshMessages(selectedAccountId, filters, searchKeyword)
-      }
-
+      await refreshReadStateViews()
+      toast.dismiss(pendingToastId)
       showMarkReadResult(result.updatedCount, result.failedCount)
     } catch (markReadError) {
+      toast.dismiss(pendingToastId)
       const messageText = getErrorMessage(markReadError, t('mailbox.readStateError'))
       setError(messageText)
       toast.error(messageText)
     }
+  }
+
+  async function refreshReadStateViews(): Promise<void> {
+    await Promise.all([
+      refreshAccounts(),
+      filters.includes('unread')
+        ? refreshMessages(selectedAccountId, filters, searchKeyword)
+        : Promise.resolve()
+    ])
   }
 
   function showMarkReadResult(updatedCount: number, failedCount: number): void {
@@ -810,6 +824,7 @@ export function MailboxWorkspace(): React.JSX.Element {
 
   function handleSelectAccount(accountId: string): void {
     if (!accountId) return
+    clearSelection()
     navigateToMailboxRoute()
     setSelectedAccountId(accountId)
     void refreshMessages(accountId, filters, searchKeyword, { selectFirst: true }).catch(
@@ -831,6 +846,7 @@ export function MailboxWorkspace(): React.JSX.Element {
   }
 
   function handleChangeFilters(nextFilters: MailFilterTag[]): void {
+    clearSelection()
     setFilters(nextFilters)
     void refreshMessages(selectedAccountId, nextFilters, searchKeyword).catch((refreshError) => {
       setError(getErrorMessage(refreshError, t('mailbox.refreshMailError')))
@@ -838,6 +854,7 @@ export function MailboxWorkspace(): React.JSX.Element {
   }
 
   function handleChangeSearchKeyword(nextSearchKeyword: string): void {
+    clearSelection()
     setSearchKeyword(nextSearchKeyword)
     void refreshMessages(selectedAccountId, filters, nextSearchKeyword).catch((refreshError) => {
       setError(getErrorMessage(refreshError, t('mailbox.searchMailError')))
@@ -941,6 +958,7 @@ export function MailboxWorkspace(): React.JSX.Element {
               onMarkAllRead={() => {
                 void handleMarkAllRead()
               }}
+              markAllUnreadCount={selectedMailboxUnread}
               selectedMessageIds={selectedMessageIds}
               allVisibleSelected={allVisibleSelected}
               someVisibleSelected={someVisibleSelected}
@@ -1099,7 +1117,9 @@ export function MailboxWorkspace(): React.JSX.Element {
         view={outboxView}
         pending={outboxPending}
         outboxMessages={outboxMessages.filter((message) => {
-          if (outboxView !== 'drafts') return message.status !== 'draft'
+          if (outboxView !== 'drafts') {
+            return ['queued', 'sending', 'failed'].includes(message.status)
+          }
           return message.status === 'draft' && message.accountId === outboxAccountId
         })}
         onOpenChange={setOutboxOpen}

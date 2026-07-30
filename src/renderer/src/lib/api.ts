@@ -31,8 +31,10 @@ import type {
   MessageReadStateUpdate,
   MessageFilterTag,
   MessageListQuery,
+  MessageDeleteMode,
   MailboxChangedEvent,
   MailtoComposeRequest,
+  DefaultMailClientStatus,
   OutboxMessage as SharedOutboxMessage,
   SettingsUpdateInput,
   SyncMode,
@@ -106,7 +108,7 @@ export type SendMessageResult = {
 
 export type DeleteMessageInput = {
   messageId: number
-  permanent?: boolean
+  mode: MessageDeleteMode
 }
 
 export type DeleteMessageResult = {
@@ -119,7 +121,7 @@ export type DeleteMessageResult = {
 
 export type BulkDeleteMessagesInput = {
   messageIds: number[]
-  permanent?: boolean
+  mode: MessageDeleteMode
 }
 
 export type MailboxSelection = {
@@ -350,6 +352,14 @@ export async function openExternalUrl(url: string): Promise<boolean> {
   return window.api.system.openExternal(url)
 }
 
+export async function getDefaultMailClientStatus(): Promise<DefaultMailClientStatus> {
+  return window.api.system.defaultMailClientStatus()
+}
+
+export async function configureDefaultMailClient(): Promise<DefaultMailClientStatus> {
+  return window.api.system.configureDefaultMailClient()
+}
+
 export async function takePendingMailtoRequests(): Promise<MailtoComposeRequest[]> {
   return window.api.system.takePendingMailtoRequests()
 }
@@ -544,7 +554,7 @@ export async function deleteDraftMessage(outboxId: number): Promise<boolean> {
 export async function deleteMessage(input: DeleteMessageInput): Promise<DeleteMessageResult> {
   const result = await window.api.messages.delete({
     messageId: input.messageId,
-    mode: input.permanent ? 'permanent' : 'trash'
+    mode: input.mode
   })
   return {
     messageId: result.messageId,
@@ -560,7 +570,7 @@ export async function bulkDeleteMessages(
 ): Promise<BulkDeleteMessagesResult> {
   return window.api.messages.bulkDelete({
     messageIds: input.messageIds,
-    mode: input.permanent ? 'permanent' : 'trash'
+    mode: input.mode
   })
 }
 

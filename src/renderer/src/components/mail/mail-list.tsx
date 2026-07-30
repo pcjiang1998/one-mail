@@ -59,6 +59,7 @@ type MailListProps = {
   onChangeSearchKeyword: (keyword: string) => void
   onLoadMore: () => void
   onMarkAllRead?: () => void
+  markAllUnreadCount?: number
   selectedMessageIds?: Set<string>
   allVisibleSelected?: boolean
   someVisibleSelected?: boolean
@@ -90,6 +91,7 @@ export function MailList({
   onChangeSearchKeyword,
   onLoadMore,
   onMarkAllRead,
+  markAllUnreadCount,
   selectedMessageIds = new Set(),
   allVisibleSelected = false,
   someVisibleSelected = false,
@@ -114,6 +116,13 @@ export function MailList({
   const unreadSelectedCount = React.useMemo(
     () => messages.filter((message) => selectedMessageIds.has(message.id) && message.unread).length,
     [messages, selectedMessageIds]
+  )
+  const handleOpenMessage = React.useCallback(
+    (messageId: string): void => {
+      if (hasSelection) onClearSelection?.()
+      onSelectMessage(messageId)
+    },
+    [hasSelection, onClearSelection, onSelectMessage]
   )
 
   const handleScroll = React.useCallback(
@@ -150,7 +159,9 @@ export function MailList({
           <Button
             size="sm"
             variant="ghost"
-            disabled={selectionDisabled || account.unread === 0 || !onMarkAllRead}
+            disabled={
+              selectionDisabled || (markAllUnreadCount ?? account.unread) === 0 || !onMarkAllRead
+            }
             onClick={onMarkAllRead}
           >
             <CheckCheck data-icon="inline-start" />
@@ -223,17 +234,21 @@ export function MailList({
 
                 return (
                   <ContextMenu key={message.id}>
-                    <ContextMenuTrigger asChild>
-                      <MessageListItem
-                        message={message}
-                        locale={locale}
-                        selected={messageSelected}
-                        checked={messageChecked}
-                        selectionDisabled={selectionDisabled}
-                        onToggleMessageSelection={onToggleMessageSelection}
-                        onSelectMessage={onSelectMessage}
-                        onPrepareContextSelection={onPrepareContextSelection}
-                      />
+                    <ContextMenuTrigger asChild className="select-text">
+                      <div
+                        className="contents"
+                        onContextMenu={() => onPrepareContextSelection?.(message.id)}
+                      >
+                        <MessageListItem
+                          message={message}
+                          locale={locale}
+                          selected={messageSelected}
+                          checked={messageChecked}
+                          selectionDisabled={selectionDisabled}
+                          onToggleMessageSelection={onToggleMessageSelection}
+                          onSelectMessage={handleOpenMessage}
+                        />
+                      </div>
                     </ContextMenuTrigger>
                     <ContextMenuContent className="w-48">
                       <ContextMenuItem
@@ -344,8 +359,7 @@ const MessageListItem = React.memo(function MessageListItem({
   checked,
   selectionDisabled,
   onToggleMessageSelection,
-  onSelectMessage,
-  onPrepareContextSelection
+  onSelectMessage
 }: {
   message: Message
   locale: AppLocale
@@ -354,7 +368,6 @@ const MessageListItem = React.memo(function MessageListItem({
   selectionDisabled?: boolean
   onToggleMessageSelection?: (messageId: string, range?: boolean) => void
   onSelectMessage: (messageId: string) => void
-  onPrepareContextSelection?: (messageId: string) => void
 }): React.JSX.Element {
   const { t } = useI18n()
   const absoluteTime = formatAbsoluteTime(message.receivedAt)
@@ -376,6 +389,11 @@ const MessageListItem = React.memo(function MessageListItem({
 
   function handleSelectClick(event: React.MouseEvent<HTMLDivElement>): void {
     if (hasSelectionInside(event.currentTarget)) return
+
+    if (event.ctrlKey || event.metaKey) {
+      if (!selectionDisabled) onToggleMessageSelection?.(message.id, false)
+      return
+    }
 
     onSelectMessage(message.id)
   }
@@ -407,10 +425,10 @@ const MessageListItem = React.memo(function MessageListItem({
       tabIndex={0}
       onClick={handleSelectClick}
       onKeyDown={handleKeyDown}
-      onContextMenu={() => onPrepareContextSelection?.(message.id)}
-      aria-selected={selected}
+      aria-selected={selected || checked}
       className={cn(
         'grid w-full cursor-default grid-cols-[16px_10px_minmax(0,1fr)] gap-2 border-b px-4 py-2 text-left outline-none transition-colors select-text hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring',
+        checked && !selected && 'bg-muted/80',
         selected && 'bg-secondary text-secondary-foreground'
       )}
     >

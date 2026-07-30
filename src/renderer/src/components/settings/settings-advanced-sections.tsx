@@ -164,6 +164,7 @@ export function SignatureSettings({
         title: trimmedTitle,
         content
       })
+      await onSubmit({})
       setSignatures((current) =>
         [...current.filter((item) => item.signatureId !== saved.signatureId), saved].sort((a, b) =>
           a.title.localeCompare(b.title)
@@ -189,6 +190,8 @@ export function SignatureSettings({
       if (globalSignatureId === selectedId) {
         setGlobalSignatureId(null)
         await onSubmit({ globalSignatureId: null })
+      } else {
+        await onSubmit({})
       }
       setSelectedId(null)
       setTitle('')

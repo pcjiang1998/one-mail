@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { getAccount } from '../db/repositories/account.repository'
-import { getMessageComposeSource } from '../db/repositories/message.repository'
+import { getMessageComposeSource, getMessageRawSource } from '../db/repositories/message.repository'
 import type { ComposeDraft, MailAttachmentInput } from '../ipc/types'
 import { authenticateImapSession } from './imap-auth'
 import { SimpleImapSession } from './imap-session'
@@ -19,28 +19,18 @@ export async function createBulkForwardDraft(messageIds: number[]): Promise<Comp
   const attachments: MailAttachmentInput[] = []
 
   for (const source of sources) {
-    const account = getAccount(source.accountId)
-    if (!account) throw new Error(`Account not found: ${source.accountId}`)
-    const session = await SimpleImapSession.connect(account, 'B')
-
-    try {
-      await authenticateImapSession(account, session)
-      await session.selectMailbox(source.folderPath)
-      const rawMessage = await session.fetchRawMessage(source.uid)
-      const filename = createEmlFilename(source.subject, source.messageId)
-      const directory = join(app.getPath('temp'), 'one-mail-next', 'forwarded-mail')
-      mkdirSync(directory, { recursive: true })
-      const filePath = join(directory, filename)
-      writeFileSync(filePath, rawMessage, 'utf8')
-      attachments.push({
-        filePath,
-        filename,
-        mimeType: 'message/rfc822',
-        sizeBytes: Buffer.byteLength(rawMessage, 'utf8')
-      })
-    } finally {
-      await session.logout().catch(() => undefined)
-    }
+    const rawMessage = getMessageRawSource(source.messageId) ?? (await fetchRawMessage(source))
+    const filename = createEmlFilename(source.subject, source.messageId)
+    const directory = join(app.getPath('temp'), 'one-mail-next', 'forwarded-mail')
+    mkdirSync(directory, { recursive: true })
+    const filePath = join(directory, filename)
+    writeFileSync(filePath, rawMessage, 'utf8')
+    attachments.push({
+      filePath,
+      filename,
+      mimeType: 'message/rfc822',
+      sizeBytes: Buffer.byteLength(rawMessage, 'utf8')
+    })
   }
 
   return {
@@ -52,6 +42,25 @@ export async function createBulkForwardDraft(messageIds: number[]): Promise<Comp
     subject: `Fwd: ${sources.length} messages`,
     bodyText: `Forwarded messages (${sources.length}) are attached as original .eml files.`,
     attachments
+  }
+}
+
+async function fetchRawMessage(
+  source: NonNullable<ReturnType<typeof getMessageComposeSource>>
+): Promise<string> {
+  const account = getAccount(source.accountId)
+  if (!account) throw new Error(`Account not found: ${source.accountId}`)
+  if (account.receiveProtocol === 'pop3') {
+    throw new Error('POP3 原始邮件缓存不存在，请先重新同步该邮件。')
+  }
+
+  const session = await SimpleImapSession.connect(account, 'B')
+  try {
+    await authenticateImapSession(account, session)
+    await session.selectMailbox(source.folderPath)
+    return await session.fetchRawMessage(source.uid)
+  } finally {
+    await session.logout().catch(() => undefined)
   }
 }
 

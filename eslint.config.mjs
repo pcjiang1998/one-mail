@@ -28,5 +28,33 @@ export default defineConfig(
       ...eslintPluginReactRefresh.configs.vite.rules
     }
   },
+  {
+    files: [
+      'src/renderer/src/components/ui/**/*.{ts,tsx}',
+      'src/renderer/src/hooks/use-mobile.ts'
+    ],
+    rules: {
+      '@typescript-eslint/explicit-function-return-type': 'off',
+      'react-hooks/set-state-in-effect': 'off',
+      'react/prop-types': 'off',
+      'react-refresh/only-export-components': 'off'
+    }
+  },
+  {
+    files: [
+      'src/renderer/src/components/mail/mail-composer.tsx',
+      'src/renderer/src/lib/i18n.tsx'
+    ],
+    rules: {
+      'react-hooks/set-state-in-effect': 'off',
+      'react-refresh/only-export-components': 'off'
+    }
+  },
+  {
+    files: ['src/renderer/src/test/setup.ts'],
+    rules: {
+      '@typescript-eslint/no-empty-function': 'off'
+    }
+  },
   eslintConfigPrettier
 )

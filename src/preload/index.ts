@@ -121,6 +121,8 @@ const api = {
     revealDatabase: () => ipcRenderer.invoke('system/revealDatabase'),
     revealPath: (path) => ipcRenderer.invoke('system/revealPath', path),
     openExternal: (url) => ipcRenderer.invoke('system/openExternal', url),
+    defaultMailClientStatus: () => ipcRenderer.invoke('system/defaultMailClientStatus'),
+    configureDefaultMailClient: () => ipcRenderer.invoke('system/configureDefaultMailClient'),
     takePendingMailtoRequests: () => ipcRenderer.invoke('system/takePendingMailtoRequests'),
     onMailtoOpened: (callback): (() => void) => {
       const listener = (): void => callback()

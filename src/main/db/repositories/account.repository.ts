@@ -816,12 +816,30 @@ function getProviderSmtpPreset(
     }
   }
 
+  if (normalizedProviderKey.includes('126') || domain === '126.com') {
+    return {
+      smtpHost: 'smtp.126.com',
+      smtpPort: 465,
+      smtpSecurity: 'ssl_tls',
+      smtpAuthType: authType,
+      smtpEnabled: true
+    }
+  }
+
+  if (normalizedProviderKey.includes('yeah') || domain === 'yeah.net') {
+    return {
+      smtpHost: 'smtp.yeah.net',
+      smtpPort: 465,
+      smtpSecurity: 'ssl_tls',
+      smtpAuthType: authType,
+      smtpEnabled: true
+    }
+  }
+
   if (
     normalizedProviderKey.includes('163') ||
     normalizedProviderKey.includes('netease') ||
-    domain === '163.com' ||
-    domain === '126.com' ||
-    domain === 'yeah.net'
+    domain === '163.com'
   ) {
     return {
       smtpHost: 'smtp.163.com',
